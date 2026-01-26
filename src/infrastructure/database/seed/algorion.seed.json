@@ -1,0 +1,298 @@
+{
+    "game_config": {
+        "initial_ph": 40,
+        "setup": {
+            "grid_size": "3x3",
+            "starting_card": "C5",
+            "total_events_in_deck": 5
+        },
+        "standard_actions": [
+            { "action": "Mover", "cost": 1 },
+            { "action": "Explorar", "cost": 1 },
+            { "action": "Explorar Novamente", "cost": 2 },
+            { "action": "Salto Livre", "cost": 2 }
+        ]
+    },
+    "heroes": [
+        {
+            "id": "bruxa",
+            "name": "Bruxa",
+            "skill": "Poção Essencial",
+            "description": "Vê secretamente o custo de resolução de duas cartas não reveladas.",
+            "unique_per_match": true
+        },
+        {
+            "id": "anao",
+            "name": "Anão",
+            "skill": "Garimpar Conhecimento",
+            "description": "Reduz o custo de resolver um enigma em 1 PH na ação atual.",
+            "unique_per_match": true
+        },
+        {
+            "id": "humano",
+            "name": "Humano",
+            "skill": "Adaptabilidade",
+            "description": "Concede uma ação de Mover sem custo para o jogador do turno.",
+            "unique_per_match": true
+        },
+        {
+            "id": "sereia",
+            "name": "Sereia",
+            "skill": "Canto da Clareza",
+            "description": "Obtém uma dica sutil do Mestre sobre a lógica ou tema do enigma.",
+            "unique_per_match": true
+        }
+    ],
+    "events": [
+        {
+            "id": "fluxo_laminar",
+            "name": "Fluxo Laminar",
+            "fluff": "Os caminhos se alinham em uma lógica perfeita.",
+            "effects": {
+                "first_move_free_per_player": true
+            }
+        },
+        {
+            "id": "eco_do_contrato",
+            "name": "Eco do Contrato",
+            "fluff": "Uma clareza rara ecoa pelo domínio, facilitando a compreensão.",
+            "effects": {
+                "first_riddle_discount": -1
+            }
+        },
+        {
+            "id": "terreno_quebradico",
+            "name": "Terreno Quebradiço",
+            "fluff": "O chão da lógica cede sob seus pés. Cada passo é incerto.",
+            "effects": {
+                "move_cost_delta": 1
+            }
+        },
+        {
+            "id": "nevoa_da_duvida",
+            "name": "Névoa da Dúvida",
+            "fluff": "Sussurros dissonantes enchem o ar, tornando a lógica uma jornada solitária.",
+            "effects": {
+                "group_discussion_blocked": true
+            }
+        },
+        {
+            "id": "atalho_efemero",
+            "name": "Atalho Efêmero",
+            "fluff": "Um corredor de luz se abre por um instante, conectando todos os pontos.",
+            "effects": {
+                "salto_livre_cost": 1
+            }
+        }
+    ],
+    "houses": [
+        {
+            "id": "C1",
+            "name": "Biblioteca dos Mil Mestres",
+            "base_cost": 2,
+            "riddle_theme": "Classes Abstratas",
+            "tip_front_source": "assets/cards/tips/1-front-biblioteca.png",
+            "final_riddle_lines": {
+                "easy": "De uma só fonte, a minha luz",
+                "hard": "Sou o enigma que a memória aduz"
+            }
+        },
+        {
+            "id": "C2",
+            "name": "Masmorra do Dragão",
+            "base_cost": 1,
+            "riddle_theme": "Polimorfismo",
+            "tip_front_source": "assets/cards/tips/2-front-masmorra.png",
+            "final_riddle_lines": {
+                "easy": "A dois destinos me conduz",
+                "hard": "De uma só flama que a dois rios conduz"
+            }
+        },
+        {
+            "id": "C3",
+            "name": "Jardim das Sementes-Mãe",
+            "base_cost": 1,
+            "riddle_theme": "Atributos (Estado)",
+            "tip_front_source": "assets/cards/tips/3-front-jardim.png",
+            "final_riddle_lines": {
+                "easy": "Dois rios correm tão sozinhos",
+                "hard": "Em leitos dúplices, correm sozinhos"
+            }
+        },
+        {
+            "id": "C4",
+            "name": "Mercado das Mil Vozes",
+            "base_cost": 2,
+            "riddle_theme": "Subclasses (Especialização)",
+            "tip_front_source": "assets/cards/tips/4-front-mercado.png",
+            "final_riddle_lines": {
+                "easy": "Levado por diferentes caminhos",
+                "hard": "Sem partilhar dos seus pergaminhos"
+            }
+        },
+        {
+            "id": "C5",
+            "name": "Bosque dos Ramos Rebeldes",
+            "base_cost": 0,
+            "riddle_theme": "Herança",
+            "final_riddle_lines": null
+        },
+        {
+            "id": "C6",
+            "name": "Arena dos Homens-Peixe",
+            "base_cost": 3,
+            "riddle_theme": "Override (Sobrescrita de Método)",
+            "tip_front_source": "assets/cards/tips/6-front-arena.png",
+            "final_riddle_lines": {
+                "easy": "E ao se encontrarem num abraço",
+                "hard": "A confluência se forja em abraço"
+            }
+        },
+        {
+            "id": "C7",
+            "name": "Deserto do Decreto Final",
+            "base_cost": 1,
+            "riddle_theme": "Métodos Final / Sealed (Imutabilidade)",
+            "tip_front_source": "assets/cards/tips/7-front-deserto.png",
+            "final_riddle_lines": {
+                "easy": "Formam um nó, que vira um laço",
+                "hard": "Tecendo a dúvida no mesmo laço"
+            }
+        },
+        {
+            "id": "C8",
+            "name": "Castelo Flutuante",
+            "base_cost": 3,
+            "riddle_theme": "Herança vs. Composição",
+            "tip_front_source": "assets/cards/tips/8-front-castelo.png",
+            "final_riddle_lines": {
+                "easy": "A dupla herança a paz consome",
+                "hard": "Um duplo legado minha clareza consome"
+            }
+        },
+        {
+            "id": "C9",
+            "name": "Montanha da Perdição",
+            "base_cost": 1,
+            "riddle_theme": "Substituição de Liskov / Contratos",
+            "tip_front_source": "assets/cards/tips/9-front-arena.png",
+            "final_riddle_lines": {
+                "easy": "Se sou dois em um, qual é meu nome?",
+                "hard": "Sou a prole de um cisma: diz-me meu nome"
+            }
+        }
+    ],
+    "final_riddle_fragments": [
+        {
+            "index": 1,
+            "variants": {
+                "easy": {
+                    "text": "De uma só fonte, a minha luz",
+                    "source": "assets/cards/tips/tip-1-easy.png"
+                },
+                "hard": {
+                    "text": "Sou o enigma que a memória aduz",
+                    "source": "assets/cards/tips/tip-1-hard.png"
+                }
+            }
+        },
+        {
+            "index": 2,
+            "variants": {
+                "easy": {
+                    "text": "A dois destinos me conduz",
+                    "source": "assets/cards/tips/tip-2-easy.png"
+                },
+                "hard": {
+                    "text": "De uma só flama que a dois rios conduz",
+                    "source": "assets/cards/tips/tip-2-hard.png"
+                }
+            }
+        },
+        {
+            "index": 3,
+            "variants": {
+                "easy": {
+                    "text": "Dois rios correm tão sozinhos",
+                    "source": "assets/cards/tips/tip-3-easy.png"
+                },
+                "hard": {
+                    "text": "Em leitos dúplices, correm sozinhos",
+                    "source": "assets/cards/tips/tip-3-hard.png"
+                }
+            }
+        },
+        {
+            "index": 4,
+            "variants": {
+                "easy": {
+                    "text": "Levado por diferentes caminhos",
+                    "source": "assets/cards/tips/tip-4-easy.png"
+                },
+                "hard": {
+                    "text": "Sem partilhar dos seus pergaminhos",
+                    "source": "assets/cards/tips/tip-4-hard.png"
+                }
+            }
+        },
+        {
+            "index": 5,
+            "variants": {
+                "easy": {
+                    "text": "E ao se encontrarem num abraço",
+                    "source": "assets/cards/tips/tip-5-easy.png"
+                },
+                "hard": {
+                    "text": "A confluência se forja em abraço",
+                    "source": "assets/cards/tips/tip-5-hard.png"
+                }
+            }
+        },
+        {
+            "index": 6,
+            "variants": {
+                "easy": {
+                    "text": "Formam um nó, que vira um laço",
+                    "source": "assets/cards/tips/tip-6-easy.png"
+                },
+                "hard": {
+                    "text": "Tecendo a dúvida no mesmo laço",
+                    "source": "assets/cards/tips/tip-6-hard.png"
+                }
+            }
+        },
+        {
+            "index": 7,
+            "variants": {
+                "easy": {
+                    "text": "A dupla herança a paz consome",
+                    "source": "assets/cards/tips/tip-7-easy.png"
+                },
+                "hard": {
+                    "text": "Um duplo legado minha clareza consome",
+                    "source": "assets/cards/tips/tip-7-hard.png"
+                }
+            }
+        },
+        {
+            "index": 8,
+            "variants": {
+                "easy": {
+                    "text": "Se sou dois em um, qual é meu nome?",
+                    "source": "assets/cards/tips/tip-8-easy.png"
+                },
+                "hard": {
+                    "text": "Sou a prole de um cisma: diz-me meu nome",
+                    "source": "assets/cards/tips/tip-8-hard.png"
+                }
+            }
+        }
+    ],
+    "final_challenge": {
+        "name": "O Devorador das Próprias Raízes",
+        "description": "O clímax ocorre quando a equipe decide Compilar ou os PH se esgotam.",
+        "answer": "Herança Diamante",
+        "success_outcome": "A criatura se petrifica, tornando-se um monumento à falha lógica.",
+        "failure_outcome": "A criatura se unifica e se torna um exército faminto contra a rebelião."
+    }
+}

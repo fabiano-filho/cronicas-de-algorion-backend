@@ -1,0 +1,29 @@
+{
+    "name": "cronicas-de-algorion-backend",
+    "version": "0.1.0",
+    "private": true,
+    "type": "commonjs",
+    "scripts": {
+        "dev": "ts-node-dev --respawn --transpile-only src/index.ts",
+        "build": "tsc -p tsconfig.json",
+        "start": "node dist/index.js",
+        "seed": "ts-node src/infrastructure/database/seed/runSeed.ts",
+        "smoke:test": "node scripts/smoke-socket-test.js"
+    },
+    "dependencies": {
+        "cors": "^2.8.5",
+        "dotenv": "^17.2.3",
+        "express": "^4.19.2",
+        "mongoose": "^8.6.1",
+        "socket.io": "^4.7.5"
+    },
+    "devDependencies": {
+        "@types/cors": "^2.8.17",
+        "@types/express": "^4.17.21",
+        "@types/node": "^20.12.12",
+        "socket.io-client": "^4.7.5",
+        "ts-node": "^10.9.2",
+        "ts-node-dev": "^2.0.0",
+        "typescript": "^5.5.4"
+    }
+}
