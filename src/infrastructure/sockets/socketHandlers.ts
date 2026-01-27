@@ -99,11 +99,23 @@ function emitTurnoAtualizado(io: Server, session: GameSession): void {
 function iniciarProximoTurno(io: Server, session: GameSession): void {
     if (session.listaJogadores.length === 0) return
 
+    const previousIndex = session.jogadorAtualIndex
     actionManager.avancarTurno(session)
-    session.rodadaAtual += 1
-    eventService.iniciarRodada(session)
+
+    // Regra: o evento permanece durante a rodada inteira.
+    // A rodada avança somente quando todos os jogadores já jogaram,
+    // ou seja, quando o turno "dá a volta" e volta ao início.
+    const wrappedToNewRound =
+        session.listaJogadores.length > 0 &&
+        session.jogadorAtualIndex <= previousIndex
+
+    if (wrappedToNewRound) {
+        session.rodadaAtual += 1
+        eventService.iniciarRodada(session)
+        emitEventoAtivo(io, session)
+    }
+
     emitTurnoAtualizado(io, session)
-    emitEventoAtivo(io, session)
 }
 
 function assertJogadorDaVez(session: GameSession, jogadorId: string): void {
@@ -180,8 +192,8 @@ export function registerSocketHandlers(io: Server): void {
             }
         )
 
-        // Compat: "avancar_rodada" agora avança um turno (não uma rodada separada).
-        // Isso mantém o comportamento alinhado com a regra: evento muda no início de cada turno.
+        // Compat: "avancar_rodada" avança o turno.
+        // A rodada (e o evento) só avançam quando o turno volta ao primeiro jogador.
         socket.on('avancar_rodada', ({ sessionId }: { sessionId: string }) => {
             const session = getSession(sessionId)
             if (!session) return
