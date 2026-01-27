@@ -6,8 +6,8 @@ Backend do jogo **Crônicas de Algorion** (Node.js + TypeScript + Socket.IO + Mo
 
 - Node.js 18+ (recomendado)
 - MongoDB:
-  - **Atlas** (recomendado) ou
-  - **Local** (localhost:27017)
+    - **Atlas** (recomendado) ou
+    - **Local** (localhost:27017)
 
 ## Configuração (.env)
 
