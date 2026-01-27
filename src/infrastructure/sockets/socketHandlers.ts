@@ -6,6 +6,7 @@ import {
     QualidadeResposta
 } from '../../domain/services/PuzzleValidator'
 import { GameSession, HintCard } from '../../domain/entities/GameSession'
+import { Card } from '../../domain/entities/Card'
 import { Anao, Bruxa, Humano, Sereia } from '../../domain/entities/Hero'
 import { Player } from '../../domain/entities/Player'
 import { RiddleController } from '../../domain/services/RiddleController'
@@ -44,6 +45,56 @@ function buildEmptyBoard(): null[][] {
         [null, null, null],
         [null, null, null]
     ]
+}
+
+function getBoardCoordsFromCasaId(casaId: string): {
+    row: number
+    col: number
+} {
+    const n = parseInt(casaId.replace('C', ''), 10)
+    if (!Number.isFinite(n) || n < 1 || n > 9) {
+        throw new Error(`Casa inválida: ${casaId}`)
+    }
+    const row = Math.floor((n - 1) / 3)
+    const col = (n - 1) % 3
+    return { row, col }
+}
+
+function ensureCardOnBoard(
+    session: GameSession,
+    casaId: string,
+    custoExploracao: 0 | 1 | 2 | 3
+): Card {
+    const { row, col } = getBoardCoordsFromCasaId(casaId)
+    const current = session.estadoTabuleiro?.[row]?.[col] ?? null
+    if (current && current.id === casaId) {
+        return current
+    }
+    const card = new Card({
+        id: casaId,
+        tipo: 'Local',
+        revelada: false,
+        custoExploracao,
+        enigma: ''
+    })
+    session.estadoTabuleiro[row][col] = card
+    return card
+}
+
+function buildInitialBoard(): (Card | null)[][] {
+    const board = buildEmptyBoard() as (Card | null)[][]
+    for (let n = 1; n <= 9; n++) {
+        const casaId = `C${n}`
+        const { row, col } = getBoardCoordsFromCasaId(casaId)
+        board[row][col] = new Card({
+            id: casaId,
+            tipo: 'Local',
+            revelada: false,
+            custoExploracao: riddleController.getCustoPH(casaId),
+            enigma: ''
+        })
+    }
+    return board
 }
 
 function buildHero(tipo: string) {
@@ -165,7 +216,7 @@ export function registerSocketHandlers(io: Server): void {
                         'Atalho Efêmero',
                         'Névoa da Dúvida'
                     ],
-                    estadoTabuleiro: buildEmptyBoard(),
+                    estadoTabuleiro: buildInitialBoard(),
                     cronometro: 0,
                     listaJogadores: []
                 })
@@ -437,7 +488,7 @@ export function registerSocketHandlers(io: Server): void {
             }: {
                 sessionId: string
                 jogadorId: string
-                custoExploracao: 1 | 2 | 3
+                custoExploracao?: 0 | 1 | 2 | 3
             }) => {
                 const session = getSession(sessionId)
                 if (!session) return
@@ -447,8 +498,23 @@ export function registerSocketHandlers(io: Server): void {
                 }
                 try {
                     assertJogadorDaVez(session, jogadorId)
-                    actionManager.explorarCarta(session, custoExploracao)
-                    iniciarProximoTurno(io, session)
+                    const player = session.listaJogadores.find(
+                        p => p.id === jogadorId
+                    )
+                    if (!player) {
+                        throw new Error('Jogador não encontrado')
+                    }
+
+                    // Explorar (1 PH): revela a carta onde o jogador está.
+                    const casaId = player.posicao
+                    const card = ensureCardOnBoard(
+                        session,
+                        casaId,
+                        riddleController.getCustoPH(casaId)
+                    )
+                    card.revelada = true
+
+                    actionManager.explorarCarta(session, 1)
                     emitEstado(io, session)
                 } catch (error) {
                     socket.emit('acao_negada', {
@@ -687,14 +753,21 @@ export function registerSocketHandlers(io: Server): void {
                         })
                         break
                     case 'Bruxa': {
-                        const cartasOcultas = session.estadoTabuleiro
+                        const ocultas = session.estadoTabuleiro
                             .flat()
-                            .filter(card => card && !card.revelada)
-                            .slice(0, 2)
-                            .map(card => ({
-                                id: card!.id,
-                                custoExploracao: card!.custoExploracao
-                            }))
+                            .filter(card => card && !card.revelada) as Card[]
+
+                        for (let i = ocultas.length - 1; i > 0; i--) {
+                            const j = Math.floor(Math.random() * (i + 1))
+                            const tmp = ocultas[i]
+                            ocultas[i] = ocultas[j]
+                            ocultas[j] = tmp
+                        }
+
+                        const cartasOcultas = ocultas.slice(0, 2).map(card => ({
+                            id: card.id,
+                            custoExploracao: card.custoExploracao
+                        }))
 
                         io.to(session.id).emit('custos_cartas_revelados', {
                             jogadorId,
@@ -770,7 +843,6 @@ export function registerSocketHandlers(io: Server): void {
                             p => p.id === jogadorId
                         )?.posicao
                     })
-                    iniciarProximoTurno(io, session)
                     emitEstado(io, session)
                 } catch (error) {
                     socket.emit('acao_negada', {

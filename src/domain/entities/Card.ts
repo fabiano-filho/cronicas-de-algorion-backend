@@ -4,7 +4,7 @@ export interface CardProps {
     id: string // C1 a C9
     tipo: CardType
     revelada: boolean
-    custoExploracao: 1 | 2 | 3
+    custoExploracao: 0 | 1 | 2 | 3
     enigma: string
 }
 
@@ -12,7 +12,7 @@ export class Card {
     public id: string
     public tipo: CardType
     public revelada: boolean
-    public custoExploracao: 1 | 2 | 3
+    public custoExploracao: 0 | 1 | 2 | 3
     public enigma: string
 
     constructor(props: CardProps) {

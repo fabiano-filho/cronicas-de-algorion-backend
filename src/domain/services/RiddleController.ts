@@ -45,6 +45,11 @@ export class RiddleController {
 
     constructor(private actionManager: ActionManager) {}
 
+    public getCustoPH(casaId: string): 0 | 1 | 2 | 3 {
+        const casa = this.casas[casaId]
+        return (casa?.custoPH ?? 1) as 0 | 1 | 2 | 3
+    }
+
     public registrarResposta(
         session: GameSession,
         input: {
