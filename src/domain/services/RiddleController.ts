@@ -76,17 +76,25 @@ export class RiddleController {
         }
         const casaId = session.riddlePendente.casaId
         const jogadorId = session.riddlePendente.jogadorId
-        const ajusteHeroi = jogadorId
-            ? (session.descontoEnigmaHeroiPorJogador[jogadorId] ?? 0)
-            : 0
+        const isRetry = !!session.riddlePendente.isRetry
 
-        this.actionManager.resolverEnigma(
-            session,
-            session.riddlePendente.custoPH,
-            ajusteHeroi
-        )
-        if (jogadorId) {
-            session.descontoEnigmaHeroiPorJogador[jogadorId] = 0
+        if (isRetry) {
+            // Regra: segunda tentativa tem custo fixo de 2 PH
+            this.actionManager.consumirPHFixo(session, 2)
+        } else {
+            const ajusteHeroi = jogadorId
+                ? (session.descontoEnigmaHeroiPorJogador[jogadorId] ?? 0)
+                : 0
+
+            this.actionManager.resolverEnigma(
+                session,
+                session.riddlePendente.custoPH,
+                ajusteHeroi
+            )
+
+            if (jogadorId) {
+                session.descontoEnigmaHeroiPorJogador[jogadorId] = 0
+            }
         }
         session.riddlePendente = null
 

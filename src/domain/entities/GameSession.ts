@@ -103,6 +103,7 @@ export class GameSession {
         casaId: string
         custoPH: 0 | 1 | 2 | 3
         jogadorId?: string
+        isRetry?: boolean
     } | null = null
     public registrosEnigmas: Record<string, 'SucessoOtimo' | 'Bom' | 'Ruim'> =
         {}

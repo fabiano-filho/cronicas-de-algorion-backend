@@ -24,6 +24,14 @@ const riddleController = new RiddleController(actionManager)
 // Contador global para IDs de cartas de pista
 let hintCardIdCounter = 1
 
+// Habilidade da Bruxa: fluxo em duas etapas (seleção -> revelação de custos)
+// Guardamos um "pending" simples por sessão+jogador para evitar spam/reentrância.
+const bruxaEscolhaPendente = new Map<string, true>()
+
+function bruxaKey(sessionId: string, jogadorId: string): string {
+    return `${sessionId}:${jogadorId}`
+}
+
 function generateHintCardId(): string {
     return `hint_${hintCardIdCounter++}`
 }
@@ -469,7 +477,6 @@ export function registerSocketHandlers(io: Server): void {
                 try {
                     assertJogadorDaVez(session, jogadorId)
                     actionManager.moverPeao(session, jogadorId, destinoId)
-                    iniciarProximoTurno(io, session)
                     emitEstado(io, session)
                 } catch (error) {
                     socket.emit('acao_negada', {
@@ -695,6 +702,10 @@ export function registerSocketHandlers(io: Server): void {
                             : { id: jogadorId, nome: '' }
                     })
 
+                    // Registrar que a casa já teve resposta (para permitir "responder novamente")
+                    session.registrosEnigmas[casaId] =
+                        quality === 'otima' ? 'SucessoOtimo' : 'Ruim'
+
                     iniciarProximoTurno(io, session)
                     emitEstado(io, session)
                 } catch (error) {
@@ -739,46 +750,188 @@ export function registerSocketHandlers(io: Server): void {
                     return
                 }
 
+                // Notificar o Mestre em tempo real quando uma habilidade for usada
+                io.to(session.id).emit('habilidade_usada', {
+                    jogador: { id: player.id, nome: player.nome },
+                    heroi: player.hero.tipo
+                })
+
                 switch (player.hero.tipo) {
                     case 'Anao':
                         session.descontoEnigmaHeroiPorJogador[jogadorId] = -1
+                        session.habilidadesUsadasPorJogador[jogadorId] = true
                         break
                     case 'Humano':
                         session.movimentoGratisHeroiPorJogador[jogadorId] = true
+                        session.habilidadesUsadasPorJogador[jogadorId] = true
                         break
                     case 'Sereia':
                         io.to(session.id).emit('sinal_dica_sutil', {
                             jogadorId,
                             heroi: 'Sereia'
                         })
+                        session.habilidadesUsadasPorJogador[jogadorId] = true
                         break
                     case 'Bruxa': {
+                        const key = bruxaKey(sessionId, jogadorId)
+                        if (bruxaEscolhaPendente.has(key)) {
+                            socket.emit('acao_negada', {
+                                motivo: 'Habilidade da Bruxa já está em seleção. Escolha as cartas antes de tentar novamente.'
+                            })
+                            return
+                        }
+
                         const ocultas = session.estadoTabuleiro
                             .flat()
                             .filter(card => card && !card.revelada) as Card[]
 
-                        for (let i = ocultas.length - 1; i > 0; i--) {
-                            const j = Math.floor(Math.random() * (i + 1))
-                            const tmp = ocultas[i]
-                            ocultas[i] = ocultas[j]
-                            ocultas[j] = tmp
+                        if (ocultas.length === 0) {
+                            socket.emit('acao_negada', {
+                                motivo: 'Nenhuma carta oculta disponível para a Bruxa revelar.'
+                            })
+                            return
                         }
 
-                        const cartasOcultas = ocultas.slice(0, 2).map(card => ({
-                            id: card.id,
-                            custoExploracao: card.custoExploracao
-                        }))
+                        bruxaEscolhaPendente.set(key, true)
 
-                        io.to(session.id).emit('custos_cartas_revelados', {
-                            jogadorId,
-                            cartas: cartasOcultas
+                        // Enviar opções para o próprio jogador escolher (sem revelar custos ainda)
+                        socket.emit('bruxa_escolher_cartas', {
+                            opcoes: ocultas.map(card => ({ id: card.id }))
                         })
-                        break
+                        // Não marca como usada aqui; só quando o jogador confirmar a seleção.
+                        emitEstado(io, session)
+                        return
                     }
                 }
 
+                emitEstado(io, session)
+            }
+        )
+
+        // Bruxa: jogador escolhe 1-2 cartas ocultas para ver o custo
+        socket.on(
+            'bruxa_revelar_custos',
+            ({
+                sessionId,
+                jogadorId,
+                casaIds
+            }: {
+                sessionId: string
+                jogadorId: string
+                casaIds: string[]
+            }) => {
+                const session = getSession(sessionId)
+                if (!session) return
+
+                if (session.jogoFinalizado) {
+                    socket.emit('acao_negada', { motivo: 'Jogo já finalizado' })
+                    return
+                }
+
+                const player = session.listaJogadores.find(
+                    p => p.id === jogadorId
+                )
+                if (!player) return
+
+                try {
+                    assertJogadorDaVez(session, jogadorId)
+                } catch (error) {
+                    socket.emit('acao_negada', {
+                        motivo: (error as Error).message
+                    })
+                    return
+                }
+
+                if (player.hero.tipo !== 'Bruxa') {
+                    socket.emit('acao_negada', {
+                        motivo: 'Ação inválida: apenas a Bruxa pode revelar custos.'
+                    })
+                    return
+                }
+
+                if (session.habilidadesUsadasPorJogador[jogadorId]) {
+                    socket.emit('acao_negada', {
+                        motivo: 'Habilidade já utilizada na partida'
+                    })
+                    return
+                }
+
+                const key = bruxaKey(sessionId, jogadorId)
+                if (!bruxaEscolhaPendente.has(key)) {
+                    socket.emit('acao_negada', {
+                        motivo: 'Nenhuma seleção pendente da Bruxa. Use a habilidade antes.'
+                    })
+                    return
+                }
+
+                const unique = Array.from(
+                    new Set((casaIds || []).filter(Boolean))
+                )
+                if (unique.length === 0) {
+                    socket.emit('acao_negada', {
+                        motivo: 'Selecione ao menos uma carta.'
+                    })
+                    return
+                }
+                if (unique.length > 2) {
+                    socket.emit('acao_negada', {
+                        motivo: 'Selecione no máximo duas cartas.'
+                    })
+                    return
+                }
+
+                const cartas: { id: string; custoExploracao: number }[] = []
+                for (const casaId of unique) {
+                    const { row, col } = getBoardCoordsFromCasaId(casaId)
+                    const card = session.estadoTabuleiro?.[row]?.[col] ?? null
+                    if (!card) {
+                        socket.emit('acao_negada', {
+                            motivo: `Casa inválida: ${casaId}`
+                        })
+                        return
+                    }
+                    if (card.revelada) {
+                        socket.emit('acao_negada', {
+                            motivo: `A casa ${casaId} já está revelada.`
+                        })
+                        return
+                    }
+                    cartas.push({
+                        id: card.id,
+                        custoExploracao: card.custoExploracao
+                    })
+                }
+
+                // Enviar os custos apenas ao jogador que usou a habilidade
+                socket.emit('custos_cartas_revelados', {
+                    jogadorId,
+                    cartas
+                })
+
+                // Notificar o mestre (em tempo real) com detalhes
+                io.to(session.id).emit('habilidade_usada', {
+                    jogador: { id: player.id, nome: player.nome },
+                    heroi: 'Bruxa',
+                    detalhes: { cartas }
+                })
+
+                bruxaEscolhaPendente.delete(key)
                 session.habilidadesUsadasPorJogador[jogadorId] = true
                 emitEstado(io, session)
+            }
+        )
+
+        socket.on(
+            'bruxa_cancelar',
+            ({
+                sessionId,
+                jogadorId
+            }: {
+                sessionId: string
+                jogadorId: string
+            }) => {
+                const key = bruxaKey(sessionId, jogadorId)
+                bruxaEscolhaPendente.delete(key)
             }
         )
 
@@ -805,7 +958,6 @@ export function registerSocketHandlers(io: Server): void {
                 try {
                     assertJogadorDaVez(session, jogadorId)
                     actionManager.saltoLivre(session, jogadorId, destinoId)
-                    iniciarProximoTurno(io, session)
                     emitEstado(io, session)
                 } catch (error) {
                     socket.emit('acao_negada', {
@@ -820,10 +972,12 @@ export function registerSocketHandlers(io: Server): void {
             'explorar_novamente',
             ({
                 sessionId,
-                jogadorId
+                jogadorId,
+                texto
             }: {
                 sessionId: string
                 jogadorId: string
+                texto: string
             }) => {
                 const session = getSession(sessionId)
                 if (!session) return
@@ -835,14 +989,49 @@ export function registerSocketHandlers(io: Server): void {
 
                 try {
                     assertJogadorDaVez(session, jogadorId)
-                    actionManager.explorarNovamente(session)
-                    // O Mestre deve revelar a nova carta manualmente
-                    io.to(session.id).emit('explorar_novamente_solicitado', {
+
+                    const player = session.listaJogadores.find(
+                        p => p.id === jogadorId
+                    )
+                    if (!player) {
+                        throw new Error('Jogador não encontrado')
+                    }
+
+                    const casaId = player.posicao
+                    const { row, col } = getBoardCoordsFromCasaId(casaId)
+                    const card = session.estadoTabuleiro?.[row]?.[col] ?? null
+
+                    if (!card || !card.revelada) {
+                        throw new Error(
+                            'Ação negada: a carta precisa estar revelada para responder novamente.'
+                        )
+                    }
+
+                    if (!session.registrosEnigmas[casaId]) {
+                        throw new Error(
+                            'Ação negada: só é possível responder novamente após a casa já ter sido respondida ao menos uma vez.'
+                        )
+                    }
+
+                    // Regra: segunda tentativa tem custo fixo 2 PH (cobrado quando o Mestre confirmar)
+                    session.riddlePendente = {
+                        casaId,
+                        custoPH: 2,
                         jogadorId,
-                        posicao: session.listaJogadores.find(
-                            p => p.id === jogadorId
-                        )?.posicao
+                        isRetry: true
+                    }
+
+                    io.to(session.id).emit('charada_iniciada', {
+                        casaId,
+                        texto,
+                        jogador: {
+                            id: player.id,
+                            nome: player.nome
+                        },
+                        custoPH: 2
                     })
+
+                    socket.emit('enigma_recebido', { texto, casaId })
                     emitEstado(io, session)
                 } catch (error) {
                     socket.emit('acao_negada', {

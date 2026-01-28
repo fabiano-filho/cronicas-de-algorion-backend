@@ -81,6 +81,10 @@ export class ActionManager {
         session.ph -= custo
     }
 
+    public consumirPHFixo(session: GameSession, custo: number): void {
+        this.consumirPH(session, custo)
+    }
+
     public moverPeao(
         session: GameSession,
         playerId: string,
