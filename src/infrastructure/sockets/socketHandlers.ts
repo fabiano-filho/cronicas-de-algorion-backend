@@ -201,6 +201,17 @@ function assertJogadorDaVez(session: GameSession, jogadorId: string): void {
     }
 }
 
+function assertSemRespostaPendente(
+    session: GameSession,
+    jogadorId: string
+): void {
+    if (session.riddlePendente?.jogadorId === jogadorId) {
+        throw new Error(
+            'Aguarde a validação do Mestre para continuar após responder o enigma.'
+        )
+    }
+}
+
 export function registerSocketHandlers(io: Server): void {
     io.on('connection', (socket: Socket) => {
         // Verificar se uma sessão existe
@@ -488,6 +499,7 @@ export function registerSocketHandlers(io: Server): void {
 
                 try {
                     assertJogadorDaVez(session, jogadorId)
+                    assertSemRespostaPendente(session, jogadorId)
                     actionManager.moverPeao(session, jogadorId, destinoId)
                     emitEstado(io, session)
                 } catch (error) {
@@ -517,6 +529,7 @@ export function registerSocketHandlers(io: Server): void {
                 }
                 try {
                     assertJogadorDaVez(session, jogadorId)
+                    assertSemRespostaPendente(session, jogadorId)
                     const player = session.listaJogadores.find(
                         p => p.id === jogadorId
                     )
@@ -783,6 +796,7 @@ export function registerSocketHandlers(io: Server): void {
                 if (!player) return
                 try {
                     assertJogadorDaVez(session, jogadorId)
+                    assertSemRespostaPendente(session, jogadorId)
                 } catch (error) {
                     socket.emit('acao_negada', {
                         motivo: (error as Error).message
@@ -881,6 +895,7 @@ export function registerSocketHandlers(io: Server): void {
 
                 try {
                     assertJogadorDaVez(session, jogadorId)
+                    assertSemRespostaPendente(session, jogadorId)
                 } catch (error) {
                     socket.emit('acao_negada', {
                         motivo: (error as Error).message
@@ -1003,6 +1018,7 @@ export function registerSocketHandlers(io: Server): void {
 
                 try {
                     assertJogadorDaVez(session, jogadorId)
+                    assertSemRespostaPendente(session, jogadorId)
                     actionManager.saltoLivre(session, jogadorId, destinoId)
                     emitEstado(io, session)
                 } catch (error) {
@@ -1035,6 +1051,7 @@ export function registerSocketHandlers(io: Server): void {
 
                 try {
                     assertJogadorDaVez(session, jogadorId)
+                    assertSemRespostaPendente(session, jogadorId)
 
                     if (session.riddlePendente) {
                         throw new Error(
@@ -1131,6 +1148,7 @@ export function registerSocketHandlers(io: Server): void {
                 }
                 try {
                     assertJogadorDaVez(session, jogadorId)
+                    assertSemRespostaPendente(session, jogadorId)
                 } catch (error) {
                     socket.emit('acao_negada', {
                         motivo: (error as Error).message
@@ -1210,6 +1228,7 @@ export function registerSocketHandlers(io: Server): void {
 
                 try {
                     assertJogadorDaVez(session, jogadorId)
+                    assertSemRespostaPendente(session, jogadorId)
                 } catch (error) {
                     socket.emit('acao_negada', {
                         motivo: (error as Error).message
@@ -1267,6 +1286,7 @@ export function registerSocketHandlers(io: Server): void {
 
                 try {
                     assertJogadorDaVez(session, jogadorId)
+                    assertSemRespostaPendente(session, jogadorId)
                 } catch (error) {
                     socket.emit('acao_negada', {
                         motivo: (error as Error).message
