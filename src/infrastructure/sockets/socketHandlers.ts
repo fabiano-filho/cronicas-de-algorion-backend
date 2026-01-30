@@ -28,8 +28,19 @@ let hintCardIdCounter = 1
 // Guardamos um "pending" simples por sessão+jogador para evitar spam/reentrância.
 const bruxaEscolhaPendente = new Map<string, true>()
 
+// Desafio Final: fluxo em chamada (jogador avisa -> mestre confirma)
+const desafioFinalPendentePorSessao = new Map<string, string>()
+
 function bruxaKey(sessionId: string, jogadorId: string): string {
     return `${sessionId}:${jogadorId}`
+}
+
+function todosSlotsEnigmaFinalPreenchidos(session: GameSession): boolean {
+    return (
+        Array.isArray(session.slotsEnigmaFinal) &&
+        session.slotsEnigmaFinal.length > 0 &&
+        session.slotsEnigmaFinal.every(s => !!s?.cardId)
+    )
 }
 
 function generateHintCardId(): string {
@@ -126,7 +137,8 @@ function emitEstado(io: Server, session: GameSession): void {
         io.to(session.id).emit('forcar_desafio_final', {
             motivo: 'PH esgotado! O grupo deve responder o Desafio Final agora.',
             deckPistas: session.deckPistas,
-            slotsEnigmaFinal: session.slotsEnigmaFinal
+            slotsEnigmaFinal: session.slotsEnigmaFinal,
+            textoEnigmaFinalMontado: session.textoEnigmaFinalMontado
         })
     }
     io.to(session.id).emit('estado_atualizado', session)
@@ -560,10 +572,44 @@ export function registerSocketHandlers(io: Server): void {
                         throw new Error('Jogo já finalizado')
                     }
                     assertJogadorDaVez(session, jogadorId)
-                    riddleController.registrarResposta(session, {
+
+                    if (session.riddlePendente) {
+                        throw new Error(
+                            'Já existe uma charada pendente para validação do Mestre.'
+                        )
+                    }
+
+                    // Regra: ao clicar para responder, o custo da casa é pago imediatamente.
+                    const custoCasa = riddleController.getCustoPH(casaId)
+                    session.riddlePendente = {
                         casaId,
+                        custoPH: custoCasa,
                         jogadorId
-                    })
+                    }
+
+                    const ajusteHeroi =
+                        session.descontoEnigmaHeroiPorJogador[jogadorId] ?? 0
+                    const descontoEvento =
+                        session.eventoAtivo?.modificadores
+                            ?.primeiroEnigmaDesconto &&
+                        !session.primeiroEnigmaDescontoUsado
+                            ? session.eventoAtivo.modificadores
+                                  .primeiroEnigmaDesconto
+                            : 0
+                    const custoBase = custoCasa
+                    const custoCobrado = Math.max(
+                        0,
+                        custoBase + descontoEvento + ajusteHeroi
+                    )
+
+                    actionManager.resolverEnigma(
+                        session,
+                        custoBase as 0 | 1 | 2 | 3,
+                        ajusteHeroi
+                    )
+
+                    // Desconto do Anão é consumido na ação atual
+                    session.descontoEnigmaHeroiPorJogador[jogadorId] = 0
 
                     // Notificar todos (incluindo Mestre) sobre a submissão do enigma
                     io.to(session.id).emit('charada_iniciada', {
@@ -573,7 +619,7 @@ export function registerSocketHandlers(io: Server): void {
                             id: player.id,
                             nome: player.nome
                         },
-                        custoPH: session.riddlePendente?.custoPH ?? null
+                        custoPH: custoCobrado
                     })
 
                     // Compat: manter o evento antigo para o socket do jogador
@@ -990,6 +1036,12 @@ export function registerSocketHandlers(io: Server): void {
                 try {
                     assertJogadorDaVez(session, jogadorId)
 
+                    if (session.riddlePendente) {
+                        throw new Error(
+                            'Já existe uma charada pendente para validação do Mestre.'
+                        )
+                    }
+
                     const player = session.listaJogadores.find(
                         p => p.id === jogadorId
                     )
@@ -1013,7 +1065,9 @@ export function registerSocketHandlers(io: Server): void {
                         )
                     }
 
-                    // Regra: segunda tentativa tem custo fixo 2 PH (cobrado quando o Mestre confirmar)
+                    // Regra: segunda tentativa tem custo fixo 2 PH (cobrado ao iniciar a tentativa)
+                    actionManager.consumirPHFixo(session, 2)
+
                     session.riddlePendente = {
                         casaId,
                         custoPH: 2,
@@ -1195,15 +1249,13 @@ export function registerSocketHandlers(io: Server): void {
 
         // Responder Desafio Final (compilar)
         socket.on(
-            'responder_desafio_final',
+            'iniciar_desafio_final',
             ({
                 sessionId,
-                jogadorId,
-                resposta
+                jogadorId
             }: {
                 sessionId: string
                 jogadorId: string
-                resposta: string
             }) => {
                 const session = getSession(sessionId)
                 if (!session) return
@@ -1222,21 +1274,92 @@ export function registerSocketHandlers(io: Server): void {
                     return
                 }
 
+                const slotsOk = todosSlotsEnigmaFinalPreenchidos(session)
+                // Se PH esgotou, o desafio pode ser forçado mesmo sem slots completos.
+                if (!slotsOk && session.ph > 0) {
+                    socket.emit('acao_negada', {
+                        motivo: 'Preencha todos os slots do enigma final antes de responder.'
+                    })
+                    return
+                }
+
+                const pendente = desafioFinalPendentePorSessao.get(session.id)
+                if (pendente) {
+                    socket.emit('acao_negada', {
+                        motivo: 'Desafio final já está pendente para validação do Mestre.'
+                    })
+                    return
+                }
+
+                const player = session.listaJogadores.find(
+                    p => p.id === jogadorId
+                )
+                desafioFinalPendentePorSessao.set(session.id, jogadorId)
+
+                io.to(session.id).emit('desafio_final_iniciado', {
+                    motivo: 'jogador_iniciou',
+                    jogador: player
+                        ? { id: player.id, nome: player.nome }
+                        : { id: jogadorId, nome: '' },
+                    textoEnigmaFinalMontado: session.textoEnigmaFinalMontado,
+                    slotsPreenchidos: slotsOk,
+                    ph: session.ph
+                })
+            }
+        )
+
+        socket.on(
+            'confirmar_desafio_final',
+            ({
+                sessionId,
+                jogadorId,
+                correta
+            }: {
+                sessionId: string
+                jogadorId: string
+                correta: boolean
+            }) => {
+                const session = getSession(sessionId)
+                if (!session) return
+
+                if (session.jogoFinalizado) {
+                    socket.emit('acao_negada', { motivo: 'Jogo já finalizado' })
+                    return
+                }
+
+                try {
+                    // Reaproveita a regra atual: validar com o jogador da vez
+                    assertJogadorDaVez(session, jogadorId)
+                } catch (error) {
+                    socket.emit('acao_negada', {
+                        motivo: (error as Error).message
+                    })
+                    return
+                }
+
+                const pendente = desafioFinalPendentePorSessao.get(session.id)
+                if (!pendente) {
+                    socket.emit('acao_negada', {
+                        motivo: 'Nenhum desafio final pendente para validação do Mestre.'
+                    })
+                    return
+                }
+
                 // A resposta correta é "Herança Diamante"
                 const respostaCorreta = 'Herança Diamante'
-                const respostaNormalizada = resposta.trim().toLowerCase()
-                const corretaNormalizada = respostaCorreta.toLowerCase()
+                const respostaEnviada = '(verbal na chamada)'
 
                 session.jogoFinalizado = true
+                desafioFinalPendentePorSessao.delete(session.id)
 
-                if (respostaNormalizada === corretaNormalizada) {
+                if (correta) {
                     session.resultadoFinal = 'vitoria'
                     io.to(session.id).emit('jogo_finalizado', {
                         resultado: 'vitoria',
                         mensagem:
                             'Parabéns! O grupo identificou corretamente a Herança Diamante!',
                         respostaCorreta,
-                        respostaEnviada: resposta
+                        respostaEnviada
                     })
                 } else {
                     session.resultadoFinal = 'derrota'
@@ -1245,7 +1368,7 @@ export function registerSocketHandlers(io: Server): void {
                         mensagem:
                             'O grupo não conseguiu identificar o problema. A resposta correta era: Herança Diamante',
                         respostaCorreta,
-                        respostaEnviada: resposta
+                        respostaEnviada
                     })
                 }
 
