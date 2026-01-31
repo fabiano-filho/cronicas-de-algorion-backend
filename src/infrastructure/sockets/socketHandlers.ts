@@ -13,7 +13,12 @@ import { RiddleController } from '../../domain/services/RiddleController'
 import { saveSession, getSession } from './sessionStore'
 import {
     getFinalRiddleFragment,
-    getHouseTipFrontSource
+    getHouseChallengeById,
+    getHouseChallenges,
+    getHouseTipFrontSource,
+    toPublicHouseChallenge,
+    type HouseChallenge,
+    type HouseChallengePublic
 } from '../gameData/GameDataCache'
 
 const actionManager = new ActionManager()
@@ -122,6 +127,41 @@ function assertCarta5ReveladaParaMover(session: GameSession): void {
             'A carta C5 precisa estar revelada antes de mover o peão.'
         )
     }
+}
+
+function getOrPickHouseChallenge(
+    session: GameSession,
+    casaId: string
+): HouseChallenge {
+    const chosen = session.desafioSelecionadoPorCasa?.[casaId] ?? null
+    if (chosen) {
+        return getHouseChallengeById(chosen)
+    }
+
+    const options = getHouseChallenges(casaId)
+    if (options.length === 0) {
+        throw new Error(
+            `Nenhum desafio configurado para a casa ${casaId}. Rode o seed.`
+        )
+    }
+
+    const picked = options[Math.floor(Math.random() * options.length)]
+    session.desafioSelecionadoPorCasa[casaId] = picked.id
+    return picked
+}
+
+function buildTextoDesafio(desafio: HouseChallengePublic): string {
+    const parts = [desafio.lore, desafio.prompt]
+        .map(v => (v || '').trim())
+        .filter(Boolean)
+
+    const textoBase = parts.join('\n\n')
+    if (!desafio.options?.length) {
+        return textoBase
+    }
+
+    const opts = desafio.options.map(o => `${o.id}) ${o.text}`).join('\n')
+    return textoBase ? `${textoBase}\n\n${opts}` : opts
 }
 
 function generateHintCardId(): string {
@@ -233,6 +273,7 @@ function resetSessionState(session: GameSession): void {
     session.inventarioPistas = { easy: [], hard: [] }
     session.riddlePendente = null
     session.registrosEnigmas = {}
+    session.desafioSelecionadoPorCasa = {}
 
     session.listaJogadores.forEach(player => {
         player.posicao = 'C5'
@@ -794,18 +835,11 @@ export function registerSocketHandlers(io: Server): void {
             }: {
                 sessionId: string
                 casaId: string
-                texto: string
+                texto?: string
             }) => {
                 const session = getSession(sessionId)
                 if (!session) return
 
-                const textoNormalizado = (texto || '').trim()
-                if (!textoNormalizado) {
-                    socket.emit('acao_negada', {
-                        motivo: 'Informe um texto para o enigma.'
-                    })
-                    return
-                }
                 try {
                     getBoardCoordsFromCasaId(casaId)
                 } catch {
@@ -815,10 +849,31 @@ export function registerSocketHandlers(io: Server): void {
                     return
                 }
 
-                io.to(session.id).emit('enigma_exibido', {
-                    casaId,
-                    texto: textoNormalizado
-                })
+                try {
+                    const desafio = getOrPickHouseChallenge(session, casaId)
+                    const desafioPublic = toPublicHouseChallenge(desafio)
+                    const textoExibicao = buildTextoDesafio(desafioPublic)
+
+                    io.to(session.id).emit('enigma_exibido', {
+                        casaId,
+                        texto: textoExibicao,
+                        desafio: desafioPublic
+                    })
+                } catch (error) {
+                    const textoNormalizado = (texto || '').trim()
+                    if (!textoNormalizado) {
+                        socket.emit('acao_negada', {
+                            motivo: (error as Error).message
+                        })
+                        return
+                    }
+
+                    // Fallback (legado): permite exibir texto livre se informado.
+                    io.to(session.id).emit('enigma_exibido', {
+                        casaId,
+                        texto: textoNormalizado
+                    })
+                }
             }
         )
 
@@ -931,6 +986,20 @@ export function registerSocketHandlers(io: Server): void {
                     }
                     assertJogadorDaVez(session, jogadorId)
 
+                    if (player.posicao !== casaId) {
+                        throw new Error(
+                            'Ação negada: você só pode responder o enigma da sua casa atual.'
+                        )
+                    }
+
+                    const { row, col } = getBoardCoordsFromCasaId(casaId)
+                    const card = session.estadoTabuleiro?.[row]?.[col] ?? null
+                    if (!card || !card.revelada) {
+                        throw new Error(
+                            'Ação negada: a carta precisa estar revelada para responder o enigma.'
+                        )
+                    }
+
                     if (session.riddlePendente) {
                         throw new Error(
                             'Já existe uma charada pendente para validação do Mestre.'
@@ -985,9 +1054,15 @@ export function registerSocketHandlers(io: Server): void {
                     session.descontoEnigmaHeroiPorJogador[jogadorId] = 0
 
                     // Notificar todos (incluindo Mestre) sobre a submissão do enigma
+                    const textoNormalizado = (texto || '').trim()
+                    const desafio = getOrPickHouseChallenge(session, casaId)
+                    const desafioPublic = toPublicHouseChallenge(desafio)
+                    const textoDesafio =
+                        textoNormalizado || buildTextoDesafio(desafioPublic)
                     io.to(session.id).emit('charada_iniciada', {
                         casaId,
-                        texto,
+                        texto: textoDesafio,
+                        desafio: desafioPublic,
                         jogador: {
                             id: player.id,
                             nome: player.nome
@@ -996,7 +1071,10 @@ export function registerSocketHandlers(io: Server): void {
                     })
 
                     // Compat: manter o evento antigo para o socket do jogador
-                    socket.emit('enigma_recebido', { texto, casaId })
+                    socket.emit('enigma_recebido', {
+                        texto: textoDesafio,
+                        casaId
+                    })
                     emitEstado(io, session)
                 } catch (error) {
                     socket.emit('acao_negada', {
@@ -1504,9 +1582,15 @@ export function registerSocketHandlers(io: Server): void {
                         isRetry: true
                     }
 
+                    const textoNormalizado = (texto || '').trim()
+                    const desafio = getOrPickHouseChallenge(session, casaId)
+                    const desafioPublic = toPublicHouseChallenge(desafio)
+                    const textoDesafio =
+                        textoNormalizado || buildTextoDesafio(desafioPublic)
                     io.to(session.id).emit('charada_iniciada', {
                         casaId,
-                        texto,
+                        texto: textoDesafio,
+                        desafio: desafioPublic,
                         jogador: {
                             id: player.id,
                             nome: player.nome
@@ -1514,7 +1598,7 @@ export function registerSocketHandlers(io: Server): void {
                         custoPH: 2
                     })
 
-                    socket.emit('enigma_recebido', { texto, casaId })
+                    socket.emit('enigma_recebido', { texto: textoDesafio, casaId })
                     emitEstado(io, session)
                 } catch (error) {
                     socket.emit('acao_negada', {

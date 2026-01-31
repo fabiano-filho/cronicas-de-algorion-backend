@@ -64,6 +64,29 @@ const FinalChallengeSchema = new Schema({
     failure_outcome: { type: String, required: true }
 })
 
+const HouseChallengeOptionSchema = new Schema(
+    {
+        id: { type: String, required: true },
+        text: { type: String, required: true }
+    },
+    { _id: false }
+)
+
+const HouseChallengeSchema = new Schema({
+    id: { type: String, required: true, unique: true },
+    house_id: { type: String, required: true, index: true },
+    type: {
+        type: String,
+        required: true,
+        enum: ['charada', 'escolha_tripla', 'codigo']
+    },
+    lore: { type: String, required: true },
+    prompt: { type: String, required: true },
+    options: { type: [HouseChallengeOptionSchema], default: [] },
+    correct_option_id: { type: String, default: null },
+    answer: { type: String, default: null }
+})
+
 export const GameConfigModel = mongoose.model('GameConfig', GameConfigSchema)
 export const HeroModel = mongoose.model('Hero', HeroSchema)
 export const EventModel = mongoose.model('Event', EventSchema)
@@ -75,4 +98,8 @@ export const FinalRiddleFragmentModel = mongoose.model(
 export const FinalChallengeModel = mongoose.model(
     'FinalChallenge',
     FinalChallengeSchema
+)
+export const HouseChallengeModel = mongoose.model(
+    'HouseChallenge',
+    HouseChallengeSchema
 )

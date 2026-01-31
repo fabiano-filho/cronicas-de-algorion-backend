@@ -3,12 +3,13 @@ import mongoose from 'mongoose'
 import * as fs from 'fs'
 import * as path from 'path'
 import {
+    EventModel,
+    FinalChallengeModel,
+    FinalRiddleFragmentModel,
     GameConfigModel,
     HeroModel,
-    EventModel,
-    HouseModel,
-    FinalRiddleFragmentModel,
-    FinalChallengeModel
+    HouseChallengeModel,
+    HouseModel
 } from '../models'
 
 const MONGO_URI =
@@ -30,6 +31,7 @@ async function seed() {
         await HouseModel.deleteMany({})
         await FinalRiddleFragmentModel.deleteMany({})
         await FinalChallengeModel.deleteMany({})
+        await HouseChallengeModel.deleteMany({})
         console.log('Coleções limpas')
 
         // Inserir game_config
@@ -58,6 +60,12 @@ async function seed() {
         await FinalChallengeModel.create(data.final_challenge)
         console.log('Desafio final inserido')
 
+        // Inserir desafios das casas
+        await HouseChallengeModel.insertMany(data.house_challenges || [])
+        console.log(
+            `${(data.house_challenges || []).length} desafios das casas inseridos`
+        )
+
         console.log('Seed concluído com sucesso!')
     } catch (error) {
         console.error('Erro ao executar seed:', error)
@@ -68,3 +76,4 @@ async function seed() {
 }
 
 seed()
+

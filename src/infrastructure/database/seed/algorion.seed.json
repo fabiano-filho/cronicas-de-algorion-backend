@@ -182,6 +182,149 @@
             }
         }
     ],
+    "house_challenges": [
+        {
+            "id": "c1_charada_1",
+            "house_id": "C1",
+            "type": "charada",
+            "lore": "Entre estantes infinitas, um tomo sem capa sussurra sobre formas que jamais se instanciam.",
+            "prompt": "Charada: Sou um molde que ninguém toca diretamente; existo para que outros existam. O que sou?",
+            "answer": "Classe abstrata"
+        },
+        {
+            "id": "c2_escolha_1",
+            "house_id": "C2",
+            "type": "escolha_tripla",
+            "lore": "Nas correntes do dragão, vozes mudam de forma sem mudar de nome.",
+            "prompt": "Qual alternativa melhor descreve polimorfismo em orientação a objetos?",
+            "options": [
+                {
+                    "id": "A",
+                    "text": "O mesmo método pode ter comportamentos diferentes dependendo do tipo do objeto."
+                },
+                { "id": "B", "text": "Dados são sempre guardados em tabelas relacionais." },
+                { "id": "C", "text": "Repetir código aumenta a manutenibilidade." }
+            ],
+            "correct_option_id": "A"
+        },
+        {
+            "id": "c3_codigo_1",
+            "house_id": "C3",
+            "type": "codigo",
+            "lore": "No jardim, o estado de cada semente muda em silêncio, mas nunca fora do ritual correto.",
+            "prompt": "Selecione o código que melhor protege o estado (atributos) para que ele só mude por métodos controlados.",
+            "options": [
+                {
+                    "id": "A",
+                    "text": "class Semente { constructor(){ this._vida=10 } get vida(){ return this._vida } regar(){ this._vida+=1 } }"
+                },
+                {
+                    "id": "B",
+                    "text": "let vida=10; function regar(){ vida+=1 }"
+                },
+                {
+                    "id": "C",
+                    "text": "class Semente { vida=10 } // qualquer um pode mudar semente.vida livremente"
+                }
+            ],
+            "correct_option_id": "A"
+        },
+        {
+            "id": "c4_charada_1",
+            "house_id": "C4",
+            "type": "charada",
+            "lore": "No mercado, cada vendedor fala a mesma língua, mas carrega mercadorias distintas.",
+            "prompt": "Charada: Sou filha de uma ideia maior; herdo forma e nome, mas acrescento detalhes. O que sou?",
+            "answer": "Subclasse"
+        },
+        {
+            "id": "c5_escolha_1",
+            "house_id": "C5",
+            "type": "escolha_tripla",
+            "lore": "No bosque, um galho antigo passa seu padrão aos ramos novos.",
+            "prompt": "Em OO, herança é usada principalmente para:",
+            "options": [
+                {
+                    "id": "A",
+                    "text": "Compartilhar e especializar comportamento/estrutura de uma classe base."
+                },
+                {
+                    "id": "B",
+                    "text": "Evitar qualquer tipo de reutilização de código."
+                },
+                {
+                    "id": "C",
+                    "text": "Substituir bancos de dados por objetos."
+                }
+            ],
+            "correct_option_id": "A"
+        },
+        {
+            "id": "c6_codigo_1",
+            "house_id": "C6",
+            "type": "codigo",
+            "lore": "Na arena, golpes são antigos — mas cada guerreiro os executa à sua maneira.",
+            "prompt": "Selecione o código que realmente sobrescreve (override) o método atacar() da classe base.",
+            "options": [
+                {
+                    "id": "A",
+                    "text": "class Peixe extends Guerreiro { atacar(){ return 'golpe' } }"
+                },
+                {
+                    "id": "B",
+                    "text": "class Peixe extends Guerreiro { atacar(alvo){ return 'golpe' } }"
+                },
+                {
+                    "id": "C",
+                    "text": "class Peixe extends Guerreiro { ataque(){ return 'golpe' } }"
+                }
+            ],
+            "correct_option_id": "A"
+        },
+        {
+            "id": "c7_escolha_1",
+            "house_id": "C7",
+            "type": "escolha_tripla",
+            "lore": "No deserto, algumas leis são seladas — nenhuma mão as reescreve.",
+            "prompt": "Em linguagens como Java/C#, métodos final/sealed servem para:",
+            "options": [
+                { "id": "A", "text": "Impedir que subclasses sobrescrevam o método." },
+                { "id": "B", "text": "Permitir que qualquer classe altere o método livremente." },
+                { "id": "C", "text": "Transformar o método em variável global." }
+            ],
+            "correct_option_id": "A"
+        },
+        {
+            "id": "c8_charada_1",
+            "house_id": "C8",
+            "type": "charada",
+            "lore": "No castelo flutuante, dois caminhos levam ao mesmo salão e a dúvida nasce na interseção.",
+            "prompt": "Charada: Quando dois ancestrais convergem e um herdeiro não sabe qual caminho seguir, qual é o nome do problema?",
+            "answer": "Herança diamante"
+        },
+        {
+            "id": "c9_escolha_1",
+            "house_id": "C9",
+            "type": "escolha_tripla",
+            "lore": "Na montanha, contratos são gravados em pedra: o substituto deve honrar a promessa.",
+            "prompt": "O princípio de Substituição de Liskov diz que:",
+            "options": [
+                {
+                    "id": "A",
+                    "text": "Uma subclasse deve poder substituir a classe base sem quebrar o comportamento esperado."
+                },
+                {
+                    "id": "B",
+                    "text": "Subclasses devem sempre remover métodos herdados."
+                },
+                {
+                    "id": "C",
+                    "text": "Toda classe deve herdar de duas classes ao mesmo tempo."
+                }
+            ],
+            "correct_option_id": "A"
+        }
+    ],
     "final_riddle_fragments": [
         {
             "index": 1,
@@ -296,3 +439,4 @@
         "failure_outcome": "A criatura se unifica e se torna um exército faminto contra a rebelião."
     }
 }
+

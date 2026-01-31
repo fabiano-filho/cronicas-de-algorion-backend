@@ -107,6 +107,7 @@ export class GameSession {
     } | null = null
     public registrosEnigmas: Record<string, 'SucessoOtimo' | 'Bom' | 'Ruim'> =
         {}
+    public desafioSelecionadoPorCasa: Record<string, string> = {}
 
     constructor(props: GameSessionProps) {
         this.id = props.id
