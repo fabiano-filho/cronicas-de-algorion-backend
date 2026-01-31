@@ -31,8 +31,53 @@ const bruxaEscolhaPendente = new Map<string, true>()
 // Desafio Final: fluxo em chamada (jogador avisa -> mestre confirma)
 const desafioFinalPendentePorSessao = new Map<string, string>()
 
+// Nome pendente (antes de escolher herói)
+const nomesPendentesPorSessao = new Map<string, Map<string, string>>()
+
 function bruxaKey(sessionId: string, jogadorId: string): string {
     return `${sessionId}:${jogadorId}`
+}
+
+function getNomePendente(sessionId: string, jogadorId: string): string | null {
+    return nomesPendentesPorSessao.get(sessionId)?.get(jogadorId) ?? null
+}
+
+function setNomePendente(
+    sessionId: string,
+    jogadorId: string,
+    nome: string
+): void {
+    const atual = nomesPendentesPorSessao.get(sessionId) ?? new Map()
+    atual.set(jogadorId, nome)
+    nomesPendentesPorSessao.set(sessionId, atual)
+}
+
+function clearNomePendente(sessionId: string, jogadorId: string): void {
+    const atual = nomesPendentesPorSessao.get(sessionId)
+    if (!atual) return
+    atual.delete(jogadorId)
+    if (atual.size === 0) {
+        nomesPendentesPorSessao.delete(sessionId)
+    }
+}
+
+function nomeEmUso(
+    session: GameSession,
+    sessionId: string,
+    nome: string,
+    jogadorId: string
+): boolean {
+    const nomeLower = nome.toLowerCase()
+    const duplicadoLista = session.listaJogadores.some(
+        p => p.id !== jogadorId && p.nome.toLowerCase() === nomeLower
+    )
+    const duplicadoPendente = Array.from(
+        nomesPendentesPorSessao.get(sessionId)?.entries() ?? []
+    ).some(
+        ([id, pendente]) =>
+            id !== jogadorId && pendente.toLowerCase() === nomeLower
+    )
+    return duplicadoLista || duplicadoPendente
 }
 
 function todosSlotsEnigmaFinalPreenchidos(session: GameSession): boolean {
@@ -41,6 +86,16 @@ function todosSlotsEnigmaFinalPreenchidos(session: GameSession): boolean {
         session.slotsEnigmaFinal.length > 0 &&
         session.slotsEnigmaFinal.every(s => !!s?.cardId)
     )
+}
+
+function getCustoEnigmaSemHeroi(session: GameSession, casaId: string): number {
+    const custoCasa = riddleController.getCustoPH(casaId)
+    const descontoEvento =
+        session.eventoAtivo?.modificadores?.primeiroEnigmaDesconto &&
+        !session.primeiroEnigmaDescontoUsado
+            ? session.eventoAtivo.modificadores.primeiroEnigmaDesconto
+            : 0
+    return Math.max(0, custoCasa + descontoEvento)
 }
 
 function generateHintCardId(): string {
@@ -149,10 +204,10 @@ function emitEventoAtivo(io: Server, session: GameSession): void {
         'evento_ativo',
         session.eventoAtivo
             ? {
-                  nome: session.eventoAtivo.nome,
-                  descricao: session.eventoAtivo.descricao,
-                  modificadores: session.eventoAtivo.modificadores
-              }
+                nome: session.eventoAtivo.nome,
+                descricao: session.eventoAtivo.descricao,
+                modificadores: session.eventoAtivo.modificadores
+            }
             : null
     )
 }
@@ -447,21 +502,48 @@ export function registerSocketHandlers(io: Server): void {
             }) => {
                 const session = getSession(sessionId)
                 if (!session) return
-                const hero = buildHero(heroiTipo)
+
+                const nomePendente = getNomePendente(sessionId, jogadorId)
+                const nomeNormalizado = (nomePendente ?? nome).trim()
+                if (!nomeNormalizado) {
+                    socket.emit('acao_negada', {
+                        motivo: 'O nome não pode estar vazio.'
+                    })
+                    return
+                }
 
                 // Verificar se jogador já existe na sessão
                 const existingPlayerIndex = session.listaJogadores.findIndex(
                     p => p.id === jogadorId
                 )
 
+                // Verificar se já existe outro jogador com o mesmo nome
+                const nomeDuplicado = nomeEmUso(
+                    session,
+                    sessionId,
+                    nomeNormalizado,
+                    jogadorId
+                )
+
+                if (nomeDuplicado) {
+                    socket.emit('acao_negada', {
+                        motivo: `Já existe um jogador com o nome "${nomeNormalizado}" nesta sessão. Escolha outro nome.`
+                    })
+                    return
+                }
+
+                const hero = buildHero(heroiTipo)
+
                 if (existingPlayerIndex !== -1) {
                     // Atualizar herói do jogador existente
                     session.listaJogadores[existingPlayerIndex].hero = hero
+                    session.listaJogadores[existingPlayerIndex].nome =
+                        nomeNormalizado
                 } else {
                     // Criar novo jogador
                     const player = new Player({
                         id: jogadorId,
-                        nome,
+                        nome: nomeNormalizado,
                         hero,
                         posicao: 'C5' // Posição inicial é sempre C5 (centro do tabuleiro)
                     })
@@ -469,12 +551,72 @@ export function registerSocketHandlers(io: Server): void {
                 }
 
                 socket.join(sessionId)
+                clearNomePendente(sessionId, jogadorId)
 
                 // Emitir atualização do lobby para todos
                 io.to(session.id).emit('lobby_atualizado', {
                     jogadores: session.listaJogadores
                 })
                 emitEstado(io, session)
+            }
+        )
+
+        // Alterar nome do jogador
+        socket.on(
+            'alterar_nome',
+            ({
+                sessionId,
+                jogadorId,
+                novoNome
+            }: {
+                sessionId: string
+                jogadorId: string
+                novoNome: string
+            }) => {
+                const session = getSession(sessionId)
+                if (!session) return
+
+                const nomeNormalizado = novoNome.trim()
+                if (!nomeNormalizado) {
+                    socket.emit('acao_negada', {
+                        motivo: 'O nome não pode estar vazio.'
+                    })
+                    return
+                }
+
+                // Verificar se já existe outro jogador com o mesmo nome
+                const nomeDuplicado = nomeEmUso(
+                    session,
+                    sessionId,
+                    nomeNormalizado,
+                    jogadorId
+                )
+
+                if (nomeDuplicado) {
+                    socket.emit('acao_negada', {
+                        motivo: `Já existe um jogador com o nome "${nomeNormalizado}" nesta sessão. Escolha outro nome.`
+                    })
+                    return
+                }
+
+                // Encontrar jogador e atualizar nome
+                const jogador = session.listaJogadores.find(p => p.id === jogadorId)
+                if (jogador) {
+                    jogador.nome = nomeNormalizado
+                    clearNomePendente(sessionId, jogadorId)
+
+                    // Emitir atualização para todos
+                    io.to(session.id).emit('lobby_atualizado', {
+                        jogadores: session.listaJogadores
+                    })
+                    emitEstado(io, session)
+
+                    // Confirmar para o jogador
+                    socket.emit('nome_alterado', { novoNome: nomeNormalizado })
+                } else {
+                    setNomePendente(sessionId, jogadorId, nomeNormalizado)
+                    socket.emit('nome_alterado', { novoNome: nomeNormalizado })
+                }
             }
         )
 
@@ -592,6 +734,21 @@ export function registerSocketHandlers(io: Server): void {
                         )
                     }
 
+                    if (
+                        player.hero.tipo === 'Sereia' &&
+                        !session.habilidadesUsadasPorJogador[jogadorId]
+                    ) {
+                        io.to(session.id).emit('habilidade_usada', {
+                            jogador: { id: player.id, nome: player.nome },
+                            heroi: 'Sereia'
+                        })
+                        io.to(session.id).emit('sinal_dica_sutil', {
+                            jogadorId,
+                            heroi: 'Sereia'
+                        })
+                        session.habilidadesUsadasPorJogador[jogadorId] = true
+                    }
+
                     // Regra: ao clicar para responder, o custo da casa é pago imediatamente.
                     const custoCasa = riddleController.getCustoPH(casaId)
                     session.riddlePendente = {
@@ -605,9 +762,9 @@ export function registerSocketHandlers(io: Server): void {
                     const descontoEvento =
                         session.eventoAtivo?.modificadores
                             ?.primeiroEnigmaDesconto &&
-                        !session.primeiroEnigmaDescontoUsado
+                            !session.primeiroEnigmaDescontoUsado
                             ? session.eventoAtivo.modificadores
-                                  .primeiroEnigmaDesconto
+                                .primeiroEnigmaDesconto
                             : 0
                     const custoBase = custoCasa
                     const custoCobrado = Math.max(
@@ -810,28 +967,53 @@ export function registerSocketHandlers(io: Server): void {
                     return
                 }
 
-                // Notificar o Mestre em tempo real quando uma habilidade for usada
-                io.to(session.id).emit('habilidade_usada', {
-                    jogador: { id: player.id, nome: player.nome },
-                    heroi: player.hero.tipo
-                })
-
                 switch (player.hero.tipo) {
                     case 'Anao':
+                        if (
+                            getCustoEnigmaSemHeroi(
+                                session,
+                                player.posicao
+                            ) <= 0
+                        ) {
+                            socket.emit('acao_negada', {
+                                motivo: 'A habilidade do Anão só pode ser usada quando o custo do enigma for maior que 0.'
+                            })
+                            return
+                        }
+                        io.to(session.id).emit('habilidade_usada', {
+                            jogador: { id: player.id, nome: player.nome },
+                            heroi: player.hero.tipo
+                        })
                         session.descontoEnigmaHeroiPorJogador[jogadorId] = -1
                         session.habilidadesUsadasPorJogador[jogadorId] = true
                         break
                     case 'Humano':
+                        {
+                            const custoMover = actionManager.calcularCusto(
+                                session,
+                                'Mover',
+                                1,
+                                jogadorId
+                            )
+                            if (custoMover <= 0) {
+                                socket.emit('acao_negada', {
+                                    motivo: 'A habilidade do Humano só pode ser usada quando o custo de movimento for maior que 0.'
+                                })
+                                return
+                            }
+                        }
+                        io.to(session.id).emit('habilidade_usada', {
+                            jogador: { id: player.id, nome: player.nome },
+                            heroi: player.hero.tipo
+                        })
                         session.movimentoGratisHeroiPorJogador[jogadorId] = true
                         session.habilidadesUsadasPorJogador[jogadorId] = true
                         break
                     case 'Sereia':
-                        io.to(session.id).emit('sinal_dica_sutil', {
-                            jogadorId,
-                            heroi: 'Sereia'
+                        socket.emit('acao_negada', {
+                            motivo: 'A habilidade da Sereia só pode ser usada ao responder um enigma.'
                         })
-                        session.habilidadesUsadasPorJogador[jogadorId] = true
-                        break
+                        return
                     case 'Bruxa': {
                         const key = bruxaKey(sessionId, jogadorId)
                         if (bruxaEscolhaPendente.has(key)) {
@@ -843,11 +1025,16 @@ export function registerSocketHandlers(io: Server): void {
 
                         const ocultas = session.estadoTabuleiro
                             .flat()
-                            .filter(card => card && !card.revelada) as Card[]
+                            .filter(
+                                card =>
+                                    card &&
+                                    !card.revelada &&
+                                    card.id !== 'C5'
+                            ) as Card[]
 
                         if (ocultas.length === 0) {
                             socket.emit('acao_negada', {
-                                motivo: 'Nenhuma carta oculta disponível para a Bruxa revelar.'
+                                motivo: 'Nenhuma carta oculta disponível para a Bruxa revelar (C5 não é permitido).'
                             })
                             return
                         }
@@ -937,6 +1124,12 @@ export function registerSocketHandlers(io: Server): void {
                 if (unique.length > 2) {
                     socket.emit('acao_negada', {
                         motivo: 'Selecione no máximo duas cartas.'
+                    })
+                    return
+                }
+                if (unique.some(id => id === 'C5')) {
+                    socket.emit('acao_negada', {
+                        motivo: 'A Bruxa não pode usar a habilidade na casa C5.'
                     })
                     return
                 }
@@ -1064,6 +1257,21 @@ export function registerSocketHandlers(io: Server): void {
                     )
                     if (!player) {
                         throw new Error('Jogador não encontrado')
+                    }
+
+                    if (
+                        player.hero.tipo === 'Sereia' &&
+                        !session.habilidadesUsadasPorJogador[jogadorId]
+                    ) {
+                        io.to(session.id).emit('habilidade_usada', {
+                            jogador: { id: player.id, nome: player.nome },
+                            heroi: 'Sereia'
+                        })
+                        io.to(session.id).emit('sinal_dica_sutil', {
+                            jogadorId,
+                            heroi: 'Sereia'
+                        })
+                        session.habilidadesUsadasPorJogador[jogadorId] = true
                     }
 
                     const casaId = player.posicao
