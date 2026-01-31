@@ -21,6 +21,14 @@ const eventService = new EventService()
 const puzzleValidator = new PuzzleValidator()
 const riddleController = new RiddleController(actionManager)
 
+const DECK_EVENTOS_INICIAL = [
+    'Fluxo Laminar',
+    'Eco do Contrato',
+    'Terreno Quebradiço',
+    'Atalho Efêmero',
+    'Névoa da Dúvida'
+]
+
 // Contador global para IDs de cartas de pista
 let hintCardIdCounter = 1
 
@@ -98,6 +106,24 @@ function getCustoEnigmaSemHeroi(session: GameSession, casaId: string): number {
     return Math.max(0, custoCasa + descontoEvento)
 }
 
+function isCarta5Revelada(session: GameSession): boolean {
+    try {
+        const { row, col } = getBoardCoordsFromCasaId('C5')
+        const card = session.estadoTabuleiro?.[row]?.[col] ?? null
+        return !!card?.revelada
+    } catch {
+        return false
+    }
+}
+
+function assertCarta5ReveladaParaMover(session: GameSession): void {
+    if (!isCarta5Revelada(session)) {
+        throw new Error(
+            'A carta C5 precisa estar revelada antes de mover o peão.'
+        )
+    }
+}
+
 function generateHintCardId(): string {
     return `hint_${hintCardIdCounter++}`
 }
@@ -118,6 +144,19 @@ function buildEmptyBoard(): null[][] {
         [null, null, null],
         [null, null, null],
         [null, null, null]
+    ]
+}
+
+function buildEmptySlotsEnigmaFinal() {
+    return [
+        { slotIndex: 0, cardId: null },
+        { slotIndex: 1, cardId: null },
+        { slotIndex: 2, cardId: null },
+        { slotIndex: 3, cardId: null },
+        { slotIndex: 4, cardId: null },
+        { slotIndex: 5, cardId: null },
+        { slotIndex: 6, cardId: null },
+        { slotIndex: 7, cardId: null }
     ]
 }
 
@@ -169,6 +208,35 @@ function buildInitialBoard(): (Card | null)[][] {
         })
     }
     return board
+}
+
+function resetSessionState(session: GameSession): void {
+    session.ph = 40
+    session.rodadaAtual = 1
+    session.deckEventos = [...DECK_EVENTOS_INICIAL]
+    session.estadoTabuleiro = buildInitialBoard()
+    session.cronometro = 0
+    session.eventoAtivo = null
+    session.primeiroMovimentoGratisUsadoPorJogador = {}
+    session.primeiroEnigmaDescontoUsado = false
+    session.movimentoGratisHeroiPorJogador = {}
+    session.descontoEnigmaHeroiPorJogador = {}
+    session.habilidadesUsadasPorJogador = {}
+    session.deckPistas = []
+    session.puzzleDeck.drawPile = buildShuffledPuzzleDeck()
+    session.puzzleDeck.assignedByHouse = {}
+    session.slotsEnigmaFinal = buildEmptySlotsEnigmaFinal()
+    session.textoEnigmaFinalMontado = ''
+    session.jogadorAtualIndex = 0
+    session.jogoFinalizado = false
+    session.resultadoFinal = null
+    session.inventarioPistas = { easy: [], hard: [] }
+    session.riddlePendente = null
+    session.registrosEnigmas = {}
+
+    session.listaJogadores.forEach(player => {
+        player.posicao = 'C5'
+    })
 }
 
 function buildHero(tipo: string) {
@@ -295,13 +363,7 @@ export function registerSocketHandlers(io: Server): void {
                     id: sessionId,
                     ph: 40,
                     rodadaAtual: 1,
-                    deckEventos: [
-                        'Fluxo Laminar',
-                        'Eco do Contrato',
-                        'Terreno Quebradiço',
-                        'Atalho Efêmero',
-                        'Névoa da Dúvida'
-                    ],
+                    deckEventos: [...DECK_EVENTOS_INICIAL],
                     estadoTabuleiro: buildInitialBoard(),
                     cronometro: 0,
                     listaJogadores: []
@@ -620,6 +682,146 @@ export function registerSocketHandlers(io: Server): void {
             }
         )
 
+        // Remover jogador (mestre)
+        socket.on(
+            'remover_jogador',
+            ({
+                sessionId,
+                jogadorIdRemover
+            }: {
+                sessionId: string
+                jogadorIdRemover: string
+            }) => {
+                const session = getSession(sessionId)
+                if (!session) return
+
+                const index = session.listaJogadores.findIndex(
+                    p => p.id === jogadorIdRemover
+                )
+                if (index === -1) return
+
+                session.listaJogadores.splice(index, 1)
+
+                // Ajustar turno atual
+                if (session.listaJogadores.length === 0) {
+                    session.jogadorAtualIndex = 0
+                } else if (index < session.jogadorAtualIndex) {
+                    session.jogadorAtualIndex = Math.max(
+                        0,
+                        session.jogadorAtualIndex - 1
+                    )
+                } else if (
+                    index === session.jogadorAtualIndex &&
+                    session.jogadorAtualIndex >= session.listaJogadores.length
+                ) {
+                    session.jogadorAtualIndex = 0
+                }
+
+                // Limpar pendências do jogador removido
+                if (session.riddlePendente?.jogadorId === jogadorIdRemover) {
+                    session.riddlePendente = null
+                }
+                if (
+                    desafioFinalPendentePorSessao.get(sessionId) ===
+                    jogadorIdRemover
+                ) {
+                    desafioFinalPendentePorSessao.delete(sessionId)
+                }
+
+                delete session.primeiroMovimentoGratisUsadoPorJogador[
+                    jogadorIdRemover
+                ]
+                delete session.movimentoGratisHeroiPorJogador[jogadorIdRemover]
+                delete session.descontoEnigmaHeroiPorJogador[jogadorIdRemover]
+                delete session.habilidadesUsadasPorJogador[jogadorIdRemover]
+                clearNomePendente(sessionId, jogadorIdRemover)
+                bruxaEscolhaPendente.delete(bruxaKey(sessionId, jogadorIdRemover))
+
+                io.to(session.id).emit('lobby_atualizado', {
+                    jogadores: session.listaJogadores
+                })
+                emitTurnoAtualizado(io, session)
+                emitEstado(io, session)
+            }
+        )
+
+        // Mestre: virar carta 5
+        socket.on('virar_carta5', ({ sessionId }: { sessionId: string }) => {
+            const session = getSession(sessionId)
+            if (!session) return
+
+            const { row, col } = getBoardCoordsFromCasaId('C5')
+            const card = session.estadoTabuleiro?.[row]?.[col] ?? null
+            if (card && !card.revelada) {
+                card.revelada = true
+            }
+            emitEstado(io, session)
+        })
+
+        // Mestre: reiniciar sessão
+        socket.on(
+            'reiniciar_sessao',
+            ({ sessionId }: { sessionId: string }) => {
+                const session = getSession(sessionId)
+                if (!session) return
+
+                resetSessionState(session)
+                desafioFinalPendentePorSessao.delete(sessionId)
+                nomesPendentesPorSessao.delete(sessionId)
+                session.listaJogadores.forEach(player => {
+                    bruxaEscolhaPendente.delete(
+                        bruxaKey(sessionId, player.id)
+                    )
+                })
+
+                eventService.iniciarRodada(session)
+                io.to(session.id).emit('lobby_atualizado', {
+                    jogadores: session.listaJogadores
+                })
+                emitEventoAtivo(io, session)
+                emitTurnoAtualizado(io, session)
+                emitEstado(io, session)
+            }
+        )
+
+        // Mestre: exibir enigma para usuários (sem custo)
+        socket.on(
+            'mestre_exibir_enigma',
+            ({
+                sessionId,
+                casaId,
+                texto
+            }: {
+                sessionId: string
+                casaId: string
+                texto: string
+            }) => {
+                const session = getSession(sessionId)
+                if (!session) return
+
+                const textoNormalizado = (texto || '').trim()
+                if (!textoNormalizado) {
+                    socket.emit('acao_negada', {
+                        motivo: 'Informe um texto para o enigma.'
+                    })
+                    return
+                }
+                try {
+                    getBoardCoordsFromCasaId(casaId)
+                } catch {
+                    socket.emit('acao_negada', {
+                        motivo: `Casa inválida: ${casaId}`
+                    })
+                    return
+                }
+
+                io.to(session.id).emit('enigma_exibido', {
+                    casaId,
+                    texto: textoNormalizado
+                })
+            }
+        )
+
         socket.on(
             'mover_peao',
             ({
@@ -642,6 +844,7 @@ export function registerSocketHandlers(io: Server): void {
                 try {
                     assertJogadorDaVez(session, jogadorId)
                     assertSemRespostaPendente(session, jogadorId)
+                    assertCarta5ReveladaParaMover(session)
                     actionManager.moverPeao(session, jogadorId, destinoId)
                     emitEstado(io, session)
                 } catch (error) {
@@ -1212,6 +1415,7 @@ export function registerSocketHandlers(io: Server): void {
                 try {
                     assertJogadorDaVez(session, jogadorId)
                     assertSemRespostaPendente(session, jogadorId)
+                    assertCarta5ReveladaParaMover(session)
                     actionManager.saltoLivre(session, jogadorId, destinoId)
                     emitEstado(io, session)
                 } catch (error) {
