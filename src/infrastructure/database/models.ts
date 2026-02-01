@@ -78,7 +78,7 @@ const HouseChallengeSchema = new Schema({
     type: {
         type: String,
         required: true,
-        enum: ['charada', 'escolha_tripla', 'codigo']
+        enum: ['charada', 'escolha_tripla', 'montagem']
     },
     lore: { type: String, required: true },
     prompt: { type: String, required: true },

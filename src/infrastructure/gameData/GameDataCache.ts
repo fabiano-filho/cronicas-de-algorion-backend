@@ -14,7 +14,7 @@ export type FinalRiddleFragment = {
     }
 }
 
-export type HouseChallengeType = 'charada' | 'escolha_tripla' | 'codigo'
+export type HouseChallengeType = 'charada' | 'escolha_tripla' | 'montagem'
 
 export type HouseChallengeOption = {
     id: string
@@ -201,4 +201,3 @@ export function toPublicHouseChallenge(
         options: challenge.options
     }
 }
-

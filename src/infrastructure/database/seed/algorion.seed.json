@@ -184,142 +184,113 @@
     ],
     "house_challenges": [
         {
-            "id": "c1_charada_1",
+            "id": "c1_biblioteca_enigma",
             "house_id": "C1",
             "type": "charada",
-            "lore": "Entre estantes infinitas, um tomo sem capa sussurra sobre formas que jamais se instanciam.",
-            "prompt": "Charada: Sou um molde que ninguém toca diretamente; existo para que outros existam. O que sou?",
+            "lore": "A Biblioteca dos Mil Mestres se ergue em meio a colunas que se perdem na penumbra e corredores que se torcem, como se a própria arquitetura sofresse com o abandono. Os tomos, órfãos de leitores, flutuam no ar estagnado, suas páginas fechadas há tanto tempo que parecem ter esquecido o próprio conteúdo.\n\nUm bibliotecário espectral aponta para as Formas Abstratas, esqueletos de lógica, e explica o desafio silencioso do lugar: aprender a distinguir o que é apenas uma promessa vazia daquilo que pode e deve ser completado.",
+            "prompt": "Em prateleiras de pedra e luz,\nrepousam formas que ninguém conduz.\nMoldes de ideias, nunca completos,\nsó ganham vida em gestos concretos.\nQuem me desvenda, herda o segredo,\ne cria sozinho seu próprio enredo.",
             "answer": "Classe abstrata"
         },
         {
-            "id": "c2_escolha_1",
+            "id": "c2_masmorra_montagem",
             "house_id": "C2",
-            "type": "escolha_tripla",
-            "lore": "Nas correntes do dragão, vozes mudam de forma sem mudar de nome.",
-            "prompt": "Qual alternativa melhor descreve polimorfismo em orientação a objetos?",
-            "options": [
-                {
-                    "id": "A",
-                    "text": "O mesmo método pode ter comportamentos diferentes dependendo do tipo do objeto."
-                },
-                { "id": "B", "text": "Dados são sempre guardados em tabelas relacionais." },
-                { "id": "C", "text": "Repetir código aumenta a manutenibilidade." }
-            ],
-            "correct_option_id": "A"
+            "type": "montagem",
+            "lore": "Vocês entram na câmara central da masmorra, um espaço vasto e silencioso, iluminado apenas por runas flutuantes que cintilam em azul. Um dragão ancião, guardião da linhagem, projeta na parede a visão de uma batalha caótica.\n\n\"Mostrem-me um comando superior. Um único Juramento que todos os herdeiros compreendam, mas que cada um execute à sua maneira. Pintem-me o pacto que une a diversidade na ação.\"",
+            "prompt": "Mecânica (Polimorfismo / método virtual)\n\nOs jogadores devem verbalizar:\n1) O nome do Juramento (o método virtual na classe base \"Herdeiro\").\n2) Como cada subclasse (Guerreiro, Mago, Arqueiro) responde a esse mesmo Juramento (a implementação do método).\n\nCritério: o comando deve invocar apenas o Juramento (sem precisar conhecer os tipos concretos dos herdeiros)."
         },
         {
-            "id": "c3_codigo_1",
+            "id": "c3_jardim_enigma",
             "house_id": "C3",
-            "type": "codigo",
-            "lore": "No jardim, o estado de cada semente muda em silêncio, mas nunca fora do ritual correto.",
-            "prompt": "Selecione o código que melhor protege o estado (atributos) para que ele só mude por métodos controlados.",
-            "options": [
-                {
-                    "id": "A",
-                    "text": "class Semente { constructor(){ this._vida=10 } get vida(){ return this._vida } regar(){ this._vida+=1 } }"
-                },
-                {
-                    "id": "B",
-                    "text": "let vida=10; function regar(){ vida+=1 }"
-                },
-                {
-                    "id": "C",
-                    "text": "class Semente { vida=10 } // qualquer um pode mudar semente.vida livremente"
-                }
-            ],
-            "correct_option_id": "A"
+            "type": "charada",
+            "lore": "Vocês adentram um santuário verdejante, onde o ar cintila com pólen dourado e as plantas emitem uma suave melodia. Um jardineiro místico aproxima-se e ergue uma semente lisa e silenciosa: uma tela em branco, um potencial adormecido.\n\n\"Toda existência começa com uma identidade\", sussurra o jardineiro. \"Para que possa se tornar algo, um segredo em seu cerne deve ser compreendido.\"",
+            "prompt": "No solo fértil escondo meu valor,\nem folhas, cores ou no doce sabor.\nCada semente traz segredo marcado,\nqualidades únicas guardo com cuidado.\nQuem me encontra sabe distinguir,\no que pertence e o que deve existir.",
+            "answer": "Atributo"
         },
         {
-            "id": "c4_charada_1",
+            "id": "c4_mercado_enigma",
             "house_id": "C4",
             "type": "charada",
-            "lore": "No mercado, cada vendedor fala a mesma língua, mas carrega mercadorias distintas.",
-            "prompt": "Charada: Sou filha de uma ideia maior; herdo forma e nome, mas acrescento detalhes. O que sou?",
+            "lore": "O Mercado das Mil Vozes é um labirinto de sons e cheiros, onde dezenas de artesãos martelam em suas forjas. Um Mestre de Guilda aponta para três ferreiros que herdaram a base do ofício e diz precisar de um especialista — alguém que tenha pego o conhecimento do mestre e o aprimorado, o especializado.",
+            "prompt": "Na feira das vozes, herdei meu lugar,\nmas não sou o tronco, sou ramo a brilhar.\nDa raiz recebi a estrutura e lei,\nmas com cada passo mostro o que criei.\nQuem me escuta percebe a lição,\nfilhos do mesmo tronco, com própria direção.",
             "answer": "Subclasse"
         },
         {
-            "id": "c5_escolha_1",
+            "id": "c5_bosque_enigma",
             "house_id": "C5",
-            "type": "escolha_tripla",
-            "lore": "No bosque, um galho antigo passa seu padrão aos ramos novos.",
-            "prompt": "Em OO, herança é usada principalmente para:",
-            "options": [
-                {
-                    "id": "A",
-                    "text": "Compartilhar e especializar comportamento/estrutura de uma classe base."
-                },
-                {
-                    "id": "B",
-                    "text": "Evitar qualquer tipo de reutilização de código."
-                },
-                {
-                    "id": "C",
-                    "text": "Substituir bancos de dados por objetos."
-                }
-            ],
-            "correct_option_id": "A"
+            "type": "charada",
+            "lore": "Vocês adentram um bosque estranho, sob os galhos de uma árvore colossal. O Espírito do Bosque sussurra: \"Todo este bosque já foi um. Cada ramo, uma continuação do meu ser. A Linhagem Fragmentada veio silenciosa, e os novos ramos brotaram órfãos, sem passado.\"",
+            "prompt": "Do tronco antigo brotam mil caminhos,\ne em cada galho guardo meus espinhos.\nCada ramo herda força e memória,\ndo pilar ancestral que dita a história.\nQuem sou eu, que passo adiante,\na essência vital de forma constante?",
+            "answer": "Herança"
         },
         {
-            "id": "c6_codigo_1",
+            "id": "c6_arena_escolha",
             "house_id": "C6",
-            "type": "codigo",
-            "lore": "Na arena, golpes são antigos — mas cada guerreiro os executa à sua maneira.",
-            "prompt": "Selecione o código que realmente sobrescreve (override) o método atacar() da classe base.",
+            "type": "escolha_tripla",
+            "lore": "Em um anfiteatro submerso, três campeões executam o Golpe da Maré sob o olhar de um Mestre Ancestral. Ele diz: \"A forma original foi herdada por todos, mas apenas um manteve seu propósito. Observem e me digam: qual deles realmente domina a arte da sobrescrita?\"",
+            "prompt": "Quem realmente está fazendo override sem corromper o propósito do Golpe da Maré?",
             "options": [
                 {
                     "id": "A",
-                    "text": "class Peixe extends Guerreiro { atacar(){ return 'golpe' } }"
+                    "text": "Kael — executa o Golpe da Maré e aprofunda o impacto com um choque elétrico no clímax."
                 },
                 {
                     "id": "B",
-                    "text": "class Peixe extends Guerreiro { atacar(alvo){ return 'golpe' } }"
+                    "text": "Lorn — inverte o golpe e o transforma em barreira defensiva giratória."
                 },
                 {
                     "id": "C",
-                    "text": "class Peixe extends Guerreiro { ataque(){ return 'golpe' } }"
+                    "text": "Mako — golpe mais destrutivo, mas com redemoinho instável que o desequilibra."
                 }
             ],
             "correct_option_id": "A"
         },
         {
-            "id": "c7_escolha_1",
+            "id": "c7_deserto_escolha",
             "house_id": "C7",
             "type": "escolha_tripla",
-            "lore": "No deserto, algumas leis são seladas — nenhuma mão as reescreve.",
-            "prompt": "Em linguagens como Java/C#, métodos final/sealed servem para:",
-            "options": [
-                { "id": "A", "text": "Impedir que subclasses sobrescrevam o método." },
-                { "id": "B", "text": "Permitir que qualquer classe altere o método livremente." },
-                { "id": "C", "text": "Transformar o método em variável global." }
-            ],
-            "correct_option_id": "A"
-        },
-        {
-            "id": "c8_charada_1",
-            "house_id": "C8",
-            "type": "charada",
-            "lore": "No castelo flutuante, dois caminhos levam ao mesmo salão e a dúvida nasce na interseção.",
-            "prompt": "Charada: Quando dois ancestrais convergem e um herdeiro não sabe qual caminho seguir, qual é o nome do problema?",
-            "answer": "Herança diamante"
-        },
-        {
-            "id": "c9_escolha_1",
-            "house_id": "C9",
-            "type": "escolha_tripla",
-            "lore": "Na montanha, contratos são gravados em pedra: o substituto deve honrar a promessa.",
-            "prompt": "O princípio de Substituição de Liskov diz que:",
+            "lore": "No Deserto do Decreto Final, o Último Monarca ergue o Decreto do Pilar: uma lei imutável. Três arquitetos se apresentam com interpretações diferentes. \"A lei é final. Apenas um deles compreende o que isso significa. Apontem o arquiteto que reerguerá meu reino.\"",
+            "prompt": "Quem compreende o significado de um método final/sealed (decreto imutável)?",
             "options": [
                 {
                     "id": "A",
-                    "text": "Uma subclasse deve poder substituir a classe base sem quebrar o comportamento esperado."
+                    "text": "Icarus — sustenta o céu e também vira torre de vigia (duplo propósito)."
                 },
                 {
                     "id": "B",
-                    "text": "Subclasses devem sempre remover métodos herdados."
+                    "text": "Daedalus — honra o propósito único; muda materiais, não o contrato."
                 },
                 {
                     "id": "C",
-                    "text": "Toda classe deve herdar de duas classes ao mesmo tempo."
+                    "text": "Eris — ignora o decreto e cria novas fundações sem sustentar o céu."
+                }
+            ],
+            "correct_option_id": "B"
+        },
+        {
+            "id": "c8_castelo_montagem",
+            "house_id": "C8",
+            "type": "montagem",
+            "lore": "No Castelo Flutuante, três autômatos guardiões são apresentados: Granito (força bruta), Cristal (luz) e Névoa (densidade do ar). O Arauto Pálido entrega um Códice da Criação em branco e questiona: o que deve ser parte da essência de todos (herança) e o que deve ser um componente único e modular (composição)?",
+            "prompt": "Mecânica (Herança vs Composição)\n\nPassos:\n1) Liste atributos e habilidades de cada guardião.\n2) Defina a herança (classe base \"Guardião\") e a composição (componentes independentes específicos).\n3) Justifique em termos de flexibilidade, reutilização e clareza.\n\nRubrica:\n- Ótima: base só com manifestar_passagem; habilidades específicas como componentes.\n- Boa: base inclui manifestar_passagem e força; restante modular.\n- Ruim: tudo na classe base; sistema inflexível e sobrecarregado."
+        },
+        {
+            "id": "c9_montanha_escolha",
+            "house_id": "C9",
+            "type": "escolha_tripla",
+            "lore": "Na Montanha da Perdição, o Último Guia descreve o contrato: a montaria deve obedecer aos comandos, carregar o fardo e permanecer estável diante de uma tempestade de cinzas. \"Um substituto deve honrar este contrato sem desvios.\"",
+            "prompt": "Qual montaria honra o contrato (compatibilidade/Liskov) e leva o grupo em segurança?",
+            "options": [
+                {
+                    "id": "A",
+                    "text": "Corcel de Obsidiana — passo pesado e estável; não responde a tempestades, apenas perdura."
+                },
+                {
+                    "id": "B",
+                    "text": "Fênix de Cinzas — ágil e renasce na tempestade; se desfaz em fogo e penas."
+                },
+                {
+                    "id": "C",
+                    "text": "Serpente de Magma — veloz, mas leal ao calor; pode ignorar comandos."
                 }
             ],
             "correct_option_id": "A"
