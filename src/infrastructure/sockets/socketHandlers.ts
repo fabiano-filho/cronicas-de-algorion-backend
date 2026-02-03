@@ -47,6 +47,16 @@ const desafioFinalPendentePorSessao = new Map<string, string>()
 // Nome pendente (antes de escolher herói)
 const nomesPendentesPorSessao = new Map<string, Map<string, string>>()
 
+// Mestre por sessão (registrado na criação da sessão)
+const mestreIdPorSessao = new Map<string, string>()
+
+// Mapear socket do jogador por sessão para permitir notificar expulsão
+const socketIdPorSessaoJogador = new Map<string, string>()
+
+function sessaoJogadorKey(sessionId: string, jogadorId: string): string {
+    return `${sessionId}:${jogadorId}`
+}
+
 function bruxaKey(sessionId: string, jogadorId: string): string {
     return `${sessionId}:${jogadorId}`
 }
@@ -313,10 +323,10 @@ function emitEventoAtivo(io: Server, session: GameSession): void {
         'evento_ativo',
         session.eventoAtivo
             ? {
-                nome: session.eventoAtivo.nome,
-                descricao: session.eventoAtivo.descricao,
-                modificadores: session.eventoAtivo.modificadores
-            }
+                  nome: session.eventoAtivo.nome,
+                  descricao: session.eventoAtivo.descricao,
+                  modificadores: session.eventoAtivo.modificadores
+              }
             : null
     )
 }
@@ -376,6 +386,13 @@ function assertSemRespostaPendente(
     }
 }
 
+function assertMestreDaSessao(sessionId: string, mestreId?: string): void {
+    const mestreRegistrado = mestreIdPorSessao.get(sessionId)
+    if (!mestreId || !mestreRegistrado || mestreRegistrado !== mestreId) {
+        throw new Error('Apenas o Mestre pode executar esta ação.')
+    }
+}
+
 export function registerSocketHandlers(io: Server): void {
     io.on('connection', (socket: Socket) => {
         // Verificar se uma sessão existe
@@ -400,6 +417,10 @@ export function registerSocketHandlers(io: Server): void {
                 sessionId: string
                 mestreId: string
             }) => {
+                // Garantir que estado temporário de uma sessão anterior não vaze
+                nomesPendentesPorSessao.delete(sessionId)
+                desafioFinalPendentePorSessao.delete(sessionId)
+
                 const session = new GameSession({
                     id: sessionId,
                     ph: 40,
@@ -416,6 +437,7 @@ export function registerSocketHandlers(io: Server): void {
 
                 eventService.iniciarRodada(session)
                 saveSession(session)
+                mestreIdPorSessao.set(sessionId, mestreId)
                 socket.join(sessionId)
                 emitEstado(io, session)
                 emitEventoAtivo(io, session)
@@ -424,11 +446,26 @@ export function registerSocketHandlers(io: Server): void {
 
         socket.on(
             'abrir_cronometro',
-            ({ sessionId, tempo }: { sessionId: string; tempo: number }) => {
+            ({
+                sessionId,
+                mestreId,
+                tempo
+            }: {
+                sessionId: string
+                mestreId: string
+                tempo: number
+            }) => {
                 const session = getSession(sessionId)
                 if (!session) return
-                session.cronometro = tempo
-                emitEstado(io, session)
+                try {
+                    assertMestreDaSessao(sessionId, mestreId)
+                    session.cronometro = tempo
+                    emitEstado(io, session)
+                } catch (error) {
+                    socket.emit('acao_negada', {
+                        motivo: (error as Error).message
+                    })
+                }
             }
         )
 
@@ -472,21 +509,30 @@ export function registerSocketHandlers(io: Server): void {
             'liberar_dica',
             ({
                 sessionId,
+                mestreId,
                 cartaId
             }: {
                 sessionId: string
+                mestreId: string
                 cartaId: string
             }) => {
                 const session = getSession(sessionId)
                 if (!session) return
-                const todasCartas = session.estadoTabuleiro
-                    .flat()
-                    .filter(Boolean)
-                const carta = todasCartas.find(c => c?.id === cartaId)
-                if (carta) {
-                    carta.revelada = true
+                try {
+                    assertMestreDaSessao(sessionId, mestreId)
+                    const todasCartas = session.estadoTabuleiro
+                        .flat()
+                        .filter(Boolean)
+                    const carta = todasCartas.find(c => c?.id === cartaId)
+                    if (carta) {
+                        carta.revelada = true
+                    }
+                    emitEstado(io, session)
+                } catch (error) {
+                    socket.emit('acao_negada', {
+                        motivo: (error as Error).message
+                    })
                 }
-                emitEstado(io, session)
             }
         )
 
@@ -511,10 +557,92 @@ export function registerSocketHandlers(io: Server): void {
                 }
                 socket.join(sessionId)
 
+                // Registrar socket para permitir ações direcionadas (ex.: expulsão)
+                socketIdPorSessaoJogador.set(
+                    sessaoJogadorKey(sessionId, jogadorId),
+                    socket.id
+                )
+
                 // Emitir estado atual para o novo participante
                 io.to(session.id).emit('lobby_atualizado', {
                     jogadores: session.listaJogadores
                 })
+                emitEstado(io, session)
+            }
+        )
+
+        // Sair da sessão (remover o próprio jogador)
+        socket.on(
+            'sair_sessao',
+            ({
+                sessionId,
+                jogadorId
+            }: {
+                sessionId: string
+                jogadorId: string
+            }) => {
+                const session = getSession(sessionId)
+                if (!session) return
+
+                const key = sessaoJogadorKey(sessionId, jogadorId)
+                const socketId = socketIdPorSessaoJogador.get(key)
+                if (!socketId || socketId !== socket.id) {
+                    socket.emit('acao_negada', {
+                        motivo: 'Você não pode remover outro jogador.'
+                    })
+                    return
+                }
+
+                // Remover socket da sala e do mapeamento
+                socket.leave(sessionId)
+                socketIdPorSessaoJogador.delete(key)
+
+                const index = session.listaJogadores.findIndex(
+                    p => p.id === jogadorId
+                )
+                if (index === -1) {
+                    emitEstado(io, session)
+                    return
+                }
+
+                session.listaJogadores.splice(index, 1)
+
+                // Ajustar turno atual
+                if (session.listaJogadores.length === 0) {
+                    session.jogadorAtualIndex = 0
+                } else if (index < session.jogadorAtualIndex) {
+                    session.jogadorAtualIndex = Math.max(
+                        0,
+                        session.jogadorAtualIndex - 1
+                    )
+                } else if (
+                    index === session.jogadorAtualIndex &&
+                    session.jogadorAtualIndex >= session.listaJogadores.length
+                ) {
+                    session.jogadorAtualIndex = 0
+                }
+
+                // Limpar pendências do jogador
+                if (session.riddlePendente?.jogadorId === jogadorId) {
+                    session.riddlePendente = null
+                }
+                if (
+                    desafioFinalPendentePorSessao.get(sessionId) === jogadorId
+                ) {
+                    desafioFinalPendentePorSessao.delete(sessionId)
+                }
+
+                delete session.primeiroMovimentoGratisUsadoPorJogador[jogadorId]
+                delete session.movimentoGratisHeroiPorJogador[jogadorId]
+                delete session.descontoEnigmaHeroiPorJogador[jogadorId]
+                delete session.habilidadesUsadasPorJogador[jogadorId]
+                clearNomePendente(sessionId, jogadorId)
+                bruxaEscolhaPendente.delete(bruxaKey(sessionId, jogadorId))
+
+                io.to(session.id).emit('lobby_atualizado', {
+                    jogadores: session.listaJogadores
+                })
+                emitTurnoAtualizado(io, session)
                 emitEstado(io, session)
             }
         )
@@ -559,6 +687,14 @@ export function registerSocketHandlers(io: Server): void {
             }) => {
                 const session = getSession(sessionId)
                 if (!session) return
+
+                const mestreRegistrado = mestreIdPorSessao.get(sessionId)
+                if (mestreRegistrado && mestreRegistrado !== mestreId) {
+                    socket.emit('acao_negada', {
+                        motivo: 'Apenas o Mestre pode iniciar o jogo.'
+                    })
+                    return
+                }
 
                 // Verificar se todos têm herói
                 const todosComHeroi = session.listaJogadores.every(
@@ -605,6 +741,12 @@ export function registerSocketHandlers(io: Server): void {
             }) => {
                 const session = getSession(sessionId)
                 if (!session) return
+
+                // Registrar socket para permitir ações direcionadas (ex.: expulsão)
+                socketIdPorSessaoJogador.set(
+                    sessaoJogadorKey(sessionId, jogadorId),
+                    socket.id
+                )
 
                 const nomePendente = getNomePendente(sessionId, jogadorId)
                 const nomeNormalizado = (nomePendente ?? nome).trim()
@@ -703,7 +845,9 @@ export function registerSocketHandlers(io: Server): void {
                 }
 
                 // Encontrar jogador e atualizar nome
-                const jogador = session.listaJogadores.find(p => p.id === jogadorId)
+                const jogador = session.listaJogadores.find(
+                    p => p.id === jogadorId
+                )
                 if (jogador) {
                     jogador.nome = nomeNormalizado
                     clearNomePendente(sessionId, jogadorId)
@@ -728,18 +872,38 @@ export function registerSocketHandlers(io: Server): void {
             'remover_jogador',
             ({
                 sessionId,
+                mestreId,
                 jogadorIdRemover
             }: {
                 sessionId: string
+                mestreId: string
                 jogadorIdRemover: string
             }) => {
                 const session = getSession(sessionId)
                 if (!session) return
 
+                const mestreRegistrado = mestreIdPorSessao.get(sessionId)
+                if (mestreRegistrado && mestreRegistrado !== mestreId) {
+                    socket.emit('acao_negada', {
+                        motivo: 'Apenas o Mestre pode remover jogadores.'
+                    })
+                    return
+                }
+
                 const index = session.listaJogadores.findIndex(
                     p => p.id === jogadorIdRemover
                 )
                 if (index === -1) return
+
+                // Notificar e remover o socket do jogador (se conhecido)
+                const key = sessaoJogadorKey(sessionId, jogadorIdRemover)
+                const socketId = socketIdPorSessaoJogador.get(key)
+                if (socketId) {
+                    io.to(socketId).emit('voce_foi_removido', { sessionId })
+                    const target = io.sockets.sockets.get(socketId)
+                    target?.leave(sessionId)
+                    socketIdPorSessaoJogador.delete(key)
+                }
 
                 session.listaJogadores.splice(index, 1)
 
@@ -776,7 +940,9 @@ export function registerSocketHandlers(io: Server): void {
                 delete session.descontoEnigmaHeroiPorJogador[jogadorIdRemover]
                 delete session.habilidadesUsadasPorJogador[jogadorIdRemover]
                 clearNomePendente(sessionId, jogadorIdRemover)
-                bruxaEscolhaPendente.delete(bruxaKey(sessionId, jogadorIdRemover))
+                bruxaEscolhaPendente.delete(
+                    bruxaKey(sessionId, jogadorIdRemover)
+                )
 
                 io.to(session.id).emit('lobby_atualizado', {
                     jogadores: session.listaJogadores
@@ -787,41 +953,71 @@ export function registerSocketHandlers(io: Server): void {
         )
 
         // Mestre: virar carta 5
-        socket.on('virar_carta5', ({ sessionId }: { sessionId: string }) => {
+        socket.on(
+            'virar_carta5',
+            ({
+                sessionId,
+                mestreId
+            }: {
+                sessionId: string
+                mestreId: string
+            }) => {
             const session = getSession(sessionId)
             if (!session) return
 
-            const { row, col } = getBoardCoordsFromCasaId('C5')
-            const card = session.estadoTabuleiro?.[row]?.[col] ?? null
-            if (card && !card.revelada) {
-                card.revelada = true
+            try {
+                assertMestreDaSessao(sessionId, mestreId)
+                const { row, col } = getBoardCoordsFromCasaId('C5')
+                const card = session.estadoTabuleiro?.[row]?.[col] ?? null
+                if (card && !card.revelada) {
+                    card.revelada = true
+                }
+                emitEstado(io, session)
+            } catch (error) {
+                socket.emit('acao_negada', {
+                    motivo: (error as Error).message
+                })
             }
-            emitEstado(io, session)
-        })
+        }
+        )
 
         // Mestre: reiniciar sessão
         socket.on(
             'reiniciar_sessao',
-            ({ sessionId }: { sessionId: string }) => {
+            ({
+                sessionId,
+                mestreId
+            }: {
+                sessionId: string
+                mestreId: string
+            }) => {
                 const session = getSession(sessionId)
                 if (!session) return
 
-                resetSessionState(session)
-                desafioFinalPendentePorSessao.delete(sessionId)
-                nomesPendentesPorSessao.delete(sessionId)
-                session.listaJogadores.forEach(player => {
-                    bruxaEscolhaPendente.delete(
-                        bruxaKey(sessionId, player.id)
-                    )
-                })
+                try {
+                    assertMestreDaSessao(sessionId, mestreId)
 
-                eventService.iniciarRodada(session)
-                io.to(session.id).emit('lobby_atualizado', {
-                    jogadores: session.listaJogadores
-                })
-                emitEventoAtivo(io, session)
-                emitTurnoAtualizado(io, session)
-                emitEstado(io, session)
+                    resetSessionState(session)
+                    desafioFinalPendentePorSessao.delete(sessionId)
+                    nomesPendentesPorSessao.delete(sessionId)
+                    session.listaJogadores.forEach(player => {
+                        bruxaEscolhaPendente.delete(
+                            bruxaKey(sessionId, player.id)
+                        )
+                    })
+
+                    eventService.iniciarRodada(session)
+                    io.to(session.id).emit('lobby_atualizado', {
+                        jogadores: session.listaJogadores
+                    })
+                    emitEventoAtivo(io, session)
+                    emitTurnoAtualizado(io, session)
+                    emitEstado(io, session)
+                } catch (error) {
+                    socket.emit('acao_negada', {
+                        motivo: (error as Error).message
+                    })
+                }
             }
         )
 
@@ -830,15 +1026,26 @@ export function registerSocketHandlers(io: Server): void {
             'mestre_exibir_enigma',
             ({
                 sessionId,
+                mestreId,
                 casaId,
                 texto
             }: {
                 sessionId: string
+                mestreId: string
                 casaId: string
                 texto?: string
             }) => {
                 const session = getSession(sessionId)
                 if (!session) return
+
+                try {
+                    assertMestreDaSessao(sessionId, mestreId)
+                } catch (error) {
+                    socket.emit('acao_negada', {
+                        motivo: (error as Error).message
+                    })
+                    return
+                }
 
                 try {
                     getBoardCoordsFromCasaId(casaId)
@@ -1034,9 +1241,9 @@ export function registerSocketHandlers(io: Server): void {
                     const descontoEvento =
                         session.eventoAtivo?.modificadores
                             ?.primeiroEnigmaDesconto &&
-                            !session.primeiroEnigmaDescontoUsado
+                        !session.primeiroEnigmaDescontoUsado
                             ? session.eventoAtivo.modificadores
-                                .primeiroEnigmaDesconto
+                                  .primeiroEnigmaDesconto
                             : 0
                     const custoBase = custoCasa
                     const custoCobrado = Math.max(
@@ -1088,10 +1295,12 @@ export function registerSocketHandlers(io: Server): void {
             'confirm_answer',
             ({
                 sessionId,
+                mestreId,
                 jogadorId,
                 quality
             }: {
                 sessionId: string
+                mestreId: string
                 jogadorId: string
                 quality: 'otima' | 'ruim'
             }) => {
@@ -1101,6 +1310,7 @@ export function registerSocketHandlers(io: Server): void {
                     if (session.jogoFinalizado) {
                         throw new Error('Jogo já finalizado')
                     }
+                    assertMestreDaSessao(sessionId, mestreId)
                     assertJogadorDaVez(session, jogadorId)
 
                     const jogadorAtual = session.listaJogadores.find(
@@ -1251,10 +1461,7 @@ export function registerSocketHandlers(io: Server): void {
                 switch (player.hero.tipo) {
                     case 'Anao':
                         if (
-                            getCustoEnigmaSemHeroi(
-                                session,
-                                player.posicao
-                            ) <= 0
+                            getCustoEnigmaSemHeroi(session, player.posicao) <= 0
                         ) {
                             socket.emit('acao_negada', {
                                 motivo: 'A habilidade do Anão só pode ser usada quando o custo do enigma for maior que 0.'
@@ -1308,9 +1515,7 @@ export function registerSocketHandlers(io: Server): void {
                             .flat()
                             .filter(
                                 card =>
-                                    card &&
-                                    !card.revelada &&
-                                    card.id !== 'C5'
+                                    card && !card.revelada && card.id !== 'C5'
                             ) as Card[]
 
                         if (ocultas.length === 0) {
@@ -1598,7 +1803,10 @@ export function registerSocketHandlers(io: Server): void {
                         custoPH: 2
                     })
 
-                    socket.emit('enigma_recebido', { texto: textoDesafio, casaId })
+                    socket.emit('enigma_recebido', {
+                        texto: textoDesafio,
+                        casaId
+                    })
                     emitEstado(io, session)
                 } catch (error) {
                     socket.emit('acao_negada', {
@@ -1828,10 +2036,12 @@ export function registerSocketHandlers(io: Server): void {
             'confirmar_desafio_final',
             ({
                 sessionId,
+                mestreId,
                 jogadorId,
                 correta
             }: {
                 sessionId: string
+                mestreId: string
                 jogadorId: string
                 correta: boolean
             }) => {
@@ -1844,6 +2054,7 @@ export function registerSocketHandlers(io: Server): void {
                 }
 
                 try {
+                    assertMestreDaSessao(sessionId, mestreId)
                     // Reaproveita a regra atual: validar com o jogador da vez
                     assertJogadorDaVez(session, jogadorId)
                 } catch (error) {

@@ -80,7 +80,18 @@ async function main() {
         7000
     )
 
-    // 3) Registrar resposta de enigma e confirmar (gera pista)
+    // 3) Preparar estado para responder enigma em C1
+    // Mestre revela C5 (regra: não pode mover até revelar)
+    socket.emit('virar_carta5', { sessionId, mestreId })
+
+    // Mover C5 -> C2 -> C1
+    socket.emit('mover_peao', { sessionId, jogadorId, destinoId: 'C2' })
+    socket.emit('mover_peao', { sessionId, jogadorId, destinoId: 'C1' })
+
+    // Revelar carta atual (C1) antes de responder
+    socket.emit('explorar_carta', { sessionId, jogadorId, custoExploracao: 1 })
+
+    // 4) Registrar resposta de enigma e confirmar (gera pista)
     socket.emit('responder_enigma', {
         sessionId,
         jogadorId,
@@ -94,7 +105,12 @@ async function main() {
         7000
     )
 
-    socket.emit('confirm_answer', { sessionId, jogadorId, quality: 'otima' })
+    socket.emit('confirm_answer', {
+        sessionId,
+        mestreId,
+        jogadorId,
+        quality: 'otima'
+    })
     const added = await waitForEvent(
         socket,
         'carta_pista_adicionada',
@@ -104,7 +120,7 @@ async function main() {
 
     const cardId = added.carta.id
 
-    // 4) Posicionar em slot e verificar broadcast
+    // 5) Posicionar em slot e verificar broadcast
     socket.emit('posicionar_pista_slot', {
         sessionId,
         jogadorId,
@@ -119,7 +135,7 @@ async function main() {
         7000
     )
 
-    // 5) Remover do slot
+    // 6) Remover do slot
     socket.emit('remover_pista_slot', {
         sessionId,
         jogadorId,
