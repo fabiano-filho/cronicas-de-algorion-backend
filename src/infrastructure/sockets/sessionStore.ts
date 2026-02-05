@@ -9,3 +9,7 @@ export function getSession(sessionId: string): GameSession | undefined {
 export function saveSession(session: GameSession): void {
     sessions.set(session.id, session)
 }
+
+export function deleteSession(sessionId: string): void {
+    sessions.delete(sessionId)
+}

@@ -10,7 +10,7 @@ import { Card } from '../../domain/entities/Card'
 import { Anao, Bruxa, Humano, Sereia } from '../../domain/entities/Hero'
 import { Player } from '../../domain/entities/Player'
 import { RiddleController } from '../../domain/services/RiddleController'
-import { saveSession, getSession } from './sessionStore'
+import { saveSession, getSession, deleteSession } from './sessionStore'
 import {
     getFinalRiddleFragment,
     getHouseChallengeById,
@@ -59,6 +59,23 @@ function sessaoJogadorKey(sessionId: string, jogadorId: string): string {
 
 function bruxaKey(sessionId: string, jogadorId: string): string {
     return `${sessionId}:${jogadorId}`
+}
+
+function cleanupSessionTemp(sessionId: string): void {
+    mestreIdPorSessao.delete(sessionId)
+    nomesPendentesPorSessao.delete(sessionId)
+    desafioFinalPendentePorSessao.delete(sessionId)
+
+    for (const key of Array.from(socketIdPorSessaoJogador.keys())) {
+        if (key.startsWith(`${sessionId}:`)) {
+            socketIdPorSessaoJogador.delete(key)
+        }
+    }
+    for (const key of Array.from(bruxaEscolhaPendente.keys())) {
+        if (key.startsWith(`${sessionId}:`)) {
+            bruxaEscolhaPendente.delete(key)
+        }
+    }
 }
 
 function getNomePendente(sessionId: string, jogadorId: string): string | null {
@@ -261,6 +278,7 @@ function buildInitialBoard(): (Card | null)[][] {
 }
 
 function resetSessionState(session: GameSession): void {
+    session.fase = 'lobby'
     session.ph = 40
     session.rodadaAtual = 1
     session.deckEventos = [...DECK_EVENTOS_INICIAL]
@@ -337,6 +355,7 @@ function emitTurnoAtualizado(io: Server, session: GameSession): void {
         jogadorAtualId: jogadorAtual?.id,
         jogadorAtualNome: jogadorAtual?.nome,
         jogadorAtualIndex: session.jogadorAtualIndex,
+        jogadorAtualCasaId: jogadorAtual?.posicao,
         rodadaAtual: session.rodadaAtual
     })
 }
@@ -403,7 +422,8 @@ export function registerSocketHandlers(io: Server): void {
                 socket.emit('sessao_verificada', {
                     sessionId,
                     existe: !!session,
-                    jogadoresConectados: session?.listaJogadores.length ?? 0
+                    jogadoresConectados: session?.listaJogadores.length ?? 0,
+                    fase: session?.fase ?? 'lobby'
                 })
             }
         )
@@ -430,6 +450,7 @@ export function registerSocketHandlers(io: Server): void {
                     cronometro: 0,
                     listaJogadores: []
                 })
+                session.fase = 'lobby'
 
                 // Inicializar permutação do puzzle (fragmentos 1..8) sem repetição
                 session.puzzleDeck.drawPile = buildShuffledPuzzleDeck()
@@ -593,6 +614,21 @@ export function registerSocketHandlers(io: Server): void {
                     return
                 }
 
+                const mestreId = mestreIdPorSessao.get(sessionId) ?? null
+                const isMestre = !!mestreId && mestreId === jogadorId
+                if (isMestre) {
+                    // Sem mestre, a sessÃ£o nÃ£o existe. Notificar todos e encerrar.
+                    io.to(session.id).emit('sessao_encerrada', {
+                        sessionId,
+                        motivo: 'mestre_saiu'
+                    })
+                    socket.leave(sessionId)
+                    socketIdPorSessaoJogador.delete(key)
+                    cleanupSessionTemp(sessionId)
+                    deleteSession(sessionId)
+                    return
+                }
+
                 // Remover socket da sala e do mapeamento
                 socket.leave(sessionId)
                 socketIdPorSessaoJogador.delete(key)
@@ -642,6 +678,14 @@ export function registerSocketHandlers(io: Server): void {
                 io.to(session.id).emit('lobby_atualizado', {
                     jogadores: session.listaJogadores
                 })
+
+                if (session.fase === 'jogo' && session.listaJogadores.length === 0) {
+                    session.fase = 'lobby'
+                    io.to(session.id).emit('sessao_sem_jogadores', {
+                        sessionId,
+                        motivo: 'todos_jogadores_sairam'
+                    })
+                }
                 emitTurnoAtualizado(io, session)
                 emitEstado(io, session)
             }
@@ -714,6 +758,8 @@ export function registerSocketHandlers(io: Server): void {
                     })
                     return
                 }
+
+                session.fase = 'jogo'
 
                 // Marcar jogo como iniciado e emitir para todos
                 io.to(session.id).emit('jogo_iniciado', {
@@ -1006,6 +1052,12 @@ export function registerSocketHandlers(io: Server): void {
                         )
                     })
 
+                    io.to(session.id).emit('sessao_reiniciada', {
+                        sessionId,
+                        at: Date.now(),
+                        by: 'mestre'
+                    })
+
                     eventService.iniciarRodada(session)
                     io.to(session.id).emit('lobby_atualizado', {
                         jogadores: session.listaJogadores
@@ -1047,11 +1099,32 @@ export function registerSocketHandlers(io: Server): void {
                     return
                 }
 
+                let coords: { row: number; col: number } | null = null
                 try {
-                    getBoardCoordsFromCasaId(casaId)
+                    coords = getBoardCoordsFromCasaId(casaId)
                 } catch {
                     socket.emit('acao_negada', {
                         motivo: `Casa inválida: ${casaId}`
+                    })
+                    return
+                }
+                if (!coords) return
+
+                const isCasa5 = casaId === 'C5'
+                const pendente = session.riddlePendente
+                if (!isCasa5 && (!pendente || pendente.casaId !== casaId)) {
+                    socket.emit('acao_negada', {
+                        motivo:
+                            'Nenhum desafio em andamento para essa casa. Aguarde o jogador escolher responder.'
+                    })
+                    return
+                }
+
+                const card =
+                    session.estadoTabuleiro?.[coords.row]?.[coords.col] ?? null
+                if (!isCasa5 && !card?.revelada) {
+                    socket.emit('acao_negada', {
+                        motivo: 'A carta precisa estar revelada para exibir o desafio.'
                     })
                     return
                 }
@@ -1142,6 +1215,11 @@ export function registerSocketHandlers(io: Server): void {
                     )
                     if (!player) {
                         throw new Error('Jogador não encontrado')
+                    }
+                    if (!isCarta5Revelada(session) && player.posicao === 'C5') {
+                        throw new Error(
+                            'A carta C5 precisa estar revelada pelo Mestre antes de iniciar as ações.'
+                        )
                     }
 
                     // Explorar (1 PH): revela a carta onde o jogador está.
@@ -1448,6 +1526,13 @@ export function registerSocketHandlers(io: Server): void {
                 } catch (error) {
                     socket.emit('acao_negada', {
                         motivo: (error as Error).message
+                    })
+                    return
+                }
+                if (!isCarta5Revelada(session)) {
+                    socket.emit('acao_negada', {
+                        motivo:
+                            'A carta C5 precisa estar revelada pelo Mestre antes de iniciar as ações.'
                     })
                     return
                 }

@@ -50,6 +50,7 @@ export interface GameSessionProps {
 
 export class GameSession {
     public id: string
+    public fase: 'lobby' | 'jogo' = 'lobby'
     public ph: number
     public rodadaAtual: number
     public deckEventos: string[]
