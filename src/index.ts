@@ -4,8 +4,16 @@ import http from 'http'
 import cors from 'cors'
 import { Server } from 'socket.io'
 import { connectDatabase } from './infrastructure/database/connection'
-import { initGameDataCache } from './infrastructure/gameData/GameDataCache'
+import {
+    getRuntimeEventById,
+    initGameDataCache
+} from './infrastructure/gameData/GameDataCache'
 import { registerSocketHandlers } from './infrastructure/sockets/socketHandlers'
+import { EventService } from './domain/services/EventSystem'
+import {
+    flushSessionStorePersistence,
+    initSessionStore
+} from './infrastructure/sockets/sessionStore'
 
 const app = express()
 const CORS_ORIGIN = process.env.CORS_ORIGIN || '*'
@@ -23,7 +31,6 @@ const io = new Server(server, {
     }
 })
 
-registerSocketHandlers(io)
 
 const PORT = process.env.PORT || 3001
 const MONGO_URI =
@@ -33,6 +40,9 @@ async function start() {
     try {
         await connectDatabase(MONGO_URI)
         await initGameDataCache()
+        const eventService = new EventService(getRuntimeEventById)
+        registerSocketHandlers(io, eventService)
+        await initSessionStore()
         server.listen(PORT, () => {
             console.log(`Servidor ativo na porta ${PORT}`)
         })
@@ -74,3 +84,20 @@ async function start() {
 }
 
 start()
+
+async function shutdown() {
+    try {
+        await flushSessionStorePersistence()
+    } catch (error) {
+        console.error('Erro ao flush de sessões no encerramento', error)
+    } finally {
+        process.exit(0)
+    }
+}
+
+process.on('SIGINT', () => {
+    void shutdown()
+})
+process.on('SIGTERM', () => {
+    void shutdown()
+})

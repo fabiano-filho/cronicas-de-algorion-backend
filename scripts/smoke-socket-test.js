@@ -83,6 +83,38 @@ async function main() {
     // 3) Preparar estado para responder enigma em C1
     // Mestre revela C5 (regra: não pode mover até revelar)
     socket.emit('virar_carta5', { sessionId, mestreId })
+    await waitForEvent(
+        socket,
+        'desafio_carta5_obrigatorio',
+        payload => payload?.jogadorId === jogadorId,
+        7000
+    )
+
+    socket.emit('responder_enigma', {
+        sessionId,
+        jogadorId,
+        texto: 'resposta-c5',
+        casaId: 'C5'
+    })
+    await waitForEvent(
+        socket,
+        'enigma_recebido',
+        payload => payload?.casaId === 'C5',
+        7000
+    )
+
+    socket.emit('confirm_answer', {
+        sessionId,
+        mestreId,
+        jogadorId,
+        quality: 'otima'
+    })
+    await waitForEvent(
+        socket,
+        'resposta_validada',
+        payload => payload?.casaId === 'C5',
+        7000
+    )
 
     // Mover C5 -> C2 -> C1
     socket.emit('mover_peao', { sessionId, jogadorId, destinoId: 'C2' })

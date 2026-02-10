@@ -10,9 +10,47 @@ export type EventModifiers = {
 }
 
 export type EventCard = {
+    id: string
     nome: string
     descricao: string
     modificadores: EventModifiers
+    backSource?: string
+}
+
+export type SessionActionCosts = {
+    mover: number
+    explorar: number
+    explorarNovamente: number
+    saltoLivre: number
+}
+
+export type SessionCatalog = {
+    heroes: Array<{
+        id: string
+        tipo: string
+        nome: string
+        habilidade: string
+        descricao: string
+    }>
+    houses: Array<{
+        id: string
+        nome: string
+        ordem: number
+        hasTip: boolean
+    }>
+    events: Array<{
+        id: string
+        nome: string
+        descricao: string
+        backSource?: string
+    }>
+    gameConfig: {
+        initialPh: number
+        gridSize: string
+        startingCardId: string
+        totalEventsInDeck: number
+        actionCosts: SessionActionCosts
+    }
 }
 
 // Representa uma carta de pista no deck do jogador
@@ -46,6 +84,15 @@ export interface GameSessionProps {
     estadoTabuleiro: (Card | null)[][] // 3x3
     cronometro: number // segundos
     listaJogadores: Player[]
+    slotsEnigmaFinal?: HintSlot[]
+    catalogo?: SessionCatalog
+}
+
+function buildDefaultFinalSlots(): HintSlot[] {
+    return Array.from({ length: 8 }, (_, slotIndex) => ({
+        slotIndex,
+        cardId: null
+    }))
 }
 
 export class GameSession {
@@ -58,6 +105,7 @@ export class GameSession {
     public cronometro: number
     public listaJogadores: Player[]
     public eventoAtivo: EventCard | null = null
+    public catalogo: SessionCatalog | null = null
     public primeiroMovimentoGratisUsadoPorJogador: Record<string, boolean> = {}
     public primeiroEnigmaDescontoUsado: boolean = false
     public movimentoGratisHeroiPorJogador: Record<string, boolean> = {}
@@ -74,16 +122,7 @@ export class GameSession {
     }
 
     // Slots para montar o enigma final (8 slots, um por casa exceto C5)
-    public slotsEnigmaFinal: HintSlot[] = [
-        { slotIndex: 0, cardId: null },
-        { slotIndex: 1, cardId: null },
-        { slotIndex: 2, cardId: null },
-        { slotIndex: 3, cardId: null },
-        { slotIndex: 4, cardId: null },
-        { slotIndex: 5, cardId: null },
-        { slotIndex: 6, cardId: null },
-        { slotIndex: 7, cardId: null }
-    ]
+    public slotsEnigmaFinal: HintSlot[] = buildDefaultFinalSlots()
 
     // Texto montado do enigma final (atualizado quando slots são preenchidos)
     public textoEnigmaFinalMontado: string = ''
@@ -102,13 +141,14 @@ export class GameSession {
     }
     public riddlePendente: {
         casaId: string
-        custoPH: 0 | 1 | 2 | 3
+        custoPH: number
         jogadorId?: string
         isRetry?: boolean
     } | null = null
     public registrosEnigmas: Record<string, 'SucessoOtimo' | 'Bom' | 'Ruim'> =
         {}
     public desafioSelecionadoPorCasa: Record<string, string> = {}
+    public enigmasExibidos: Record<string, boolean> = {}
 
     constructor(props: GameSessionProps) {
         this.id = props.id
@@ -118,5 +158,10 @@ export class GameSession {
         this.estadoTabuleiro = props.estadoTabuleiro
         this.cronometro = props.cronometro
         this.listaJogadores = props.listaJogadores
+        this.slotsEnigmaFinal =
+            props.slotsEnigmaFinal && props.slotsEnigmaFinal.length === 8
+                ? props.slotsEnigmaFinal
+                : buildDefaultFinalSlots()
+        this.catalogo = props.catalogo ?? null
     }
 }

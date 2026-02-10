@@ -8,7 +8,21 @@ export type ActionCostType =
     | 'ExplorarNovamente'
     | 'SaltoLivre'
 
-// Mapa de adjacências do tabuleiro 3x3
+export type ActionBaseCosts = {
+    mover: number
+    explorar: number
+    explorarNovamente: number
+    saltoLivre: number
+}
+
+const DEFAULT_ACTION_COSTS: ActionBaseCosts = {
+    mover: 1,
+    explorar: 1,
+    explorarNovamente: 2,
+    saltoLivre: 2
+}
+
+// Mapa de adjacencias do tabuleiro 3x3
 // C1 C2 C3
 // C4 C5 C6
 // C7 C8 C9
@@ -25,52 +39,94 @@ const ADJACENCIAS: Record<string, string[]> = {
 }
 
 export class ActionManager {
+    constructor(
+        private resolveActionCosts: () => ActionBaseCosts = () =>
+            DEFAULT_ACTION_COSTS
+    ) {}
+
+    private getActionCosts(): ActionBaseCosts {
+        const costs = this.resolveActionCosts?.() ?? DEFAULT_ACTION_COSTS
+        const safe = (value: unknown, fallback: number): number => {
+            const parsed = Number(value)
+            return Number.isFinite(parsed) ? parsed : fallback
+        }
+
+        return {
+            mover: safe(costs.mover, DEFAULT_ACTION_COSTS.mover),
+            explorar: safe(costs.explorar, DEFAULT_ACTION_COSTS.explorar),
+            explorarNovamente: safe(
+                costs.explorarNovamente,
+                DEFAULT_ACTION_COSTS.explorarNovamente
+            ),
+            saltoLivre: safe(costs.saltoLivre, DEFAULT_ACTION_COSTS.saltoLivre)
+        }
+    }
+
     private getPlayer(session: GameSession, playerId: string): Player {
         const player = session.listaJogadores.find(p => p.id === playerId)
         if (!player) {
-            throw new Error('Jogador não encontrado')
+            throw new Error('Jogador nao encontrado')
         }
         return player
     }
 
-    // Verifica se duas casas são ortogonalmente adjacentes
+    // Verifica se duas casas sao ortogonalmente adjacentes
     public saoAdjacentes(origemId: string, destinoId: string): boolean {
         const adjacentes = ADJACENCIAS[origemId]
         return adjacentes ? adjacentes.includes(destinoId) : false
     }
 
+    private isEventFirstMoveFree(session: GameSession, playerId?: string): boolean {
+        if (!playerId) return false
+        const modifiers = session.eventoAtivo?.modificadores
+        return (
+            !!modifiers?.primeiroMovimentoGratisPorJogador &&
+            !session.primeiroMovimentoGratisUsadoPorJogador[playerId]
+        )
+    }
+
+    private isHeroMoveFree(session: GameSession, playerId?: string): boolean {
+        if (!playerId) return false
+        return !!session.movimentoGratisHeroiPorJogador[playerId]
+    }
+
+    private markEventFirstMoveUsed(session: GameSession, playerId?: string): void {
+        if (!playerId) return
+        session.primeiroMovimentoGratisUsadoPorJogador[playerId] = true
+    }
+
     public calcularCusto(
         session: GameSession,
         tipo: ActionCostType,
-        enigmaCusto: 0 | 1 | 2 | 3 = 1,
+        enigmaCusto = 1,
         playerId?: string
     ): number {
+        const actionCosts = this.getActionCosts()
+        const gratuitoEvento = this.isEventFirstMoveFree(session, playerId)
+        const gratuitoHeroi = this.isHeroMoveFree(session, playerId)
         let base: number
         const modificadores = session.eventoAtivo?.modificadores
+
         switch (tipo) {
             case 'Mover':
-                base = 1
-                const gratuitoEvento =
-                    !!playerId &&
-                    modificadores?.primeiroMovimentoGratisPorJogador &&
-                    !session.primeiroMovimentoGratisUsadoPorJogador[playerId]
-                const gratuitoHeroi =
-                    !!playerId &&
-                    session.movimentoGratisHeroiPorJogador[playerId]
+                base = actionCosts.mover
                 if (gratuitoEvento || gratuitoHeroi) {
                     return 0
                 }
                 return base + (modificadores?.moverDelta ?? 0)
             case 'Explorar':
-                return 1
+                return actionCosts.explorar
             case 'ResolverEnigma':
                 return enigmaCusto
             case 'ExplorarNovamente':
-                return 2
+                return actionCosts.explorarNovamente
             case 'SaltoLivre':
-                return modificadores?.saltoLivreCusto ?? 2
+                if (gratuitoEvento || gratuitoHeroi) {
+                    return 0
+                }
+                return modificadores?.saltoLivreCusto ?? actionCosts.saltoLivre
             default:
-                return 1
+                return actionCosts.mover
         }
     }
 
@@ -92,35 +148,29 @@ export class ActionManager {
     ): GameSession {
         const player = this.getPlayer(session, playerId)
 
-        // Validar adjacência ortogonal
+        // Validar adjacencia ortogonal
         if (!this.saoAdjacentes(player.posicao, destinoId)) {
             throw new Error(
-                `Movimento inválido: ${player.posicao} não é adjacente a ${destinoId}. Use Salto Livre para casas não adjacentes.`
+                `Movimento invalido: ${player.posicao} nao e adjacente a ${destinoId}. Use Salto Livre para casas nao adjacentes.`
             )
         }
 
-        const usadoEvento =
-            session.eventoAtivo?.modificadores
-                ?.primeiroMovimentoGratisPorJogador &&
-            !session.primeiroMovimentoGratisUsadoPorJogador[playerId]
-        const usadoHeroi = session.movimentoGratisHeroiPorJogador[playerId]
+        const eventoGratuito = this.isEventFirstMoveFree(session, playerId)
+        const heroGratuito = this.isHeroMoveFree(session, playerId)
         const custo = this.calcularCusto(session, 'Mover', 1, playerId)
         this.consumirPH(session, custo)
 
         player.posicao = destinoId
-        if (usadoEvento) {
-            session.primeiroMovimentoGratisUsadoPorJogador[playerId] = true
+        if (eventoGratuito) {
+            this.markEventFirstMoveUsed(session, playerId)
         }
-        if (usadoHeroi) {
+        if (heroGratuito) {
             session.movimentoGratisHeroiPorJogador[playerId] = false
         }
         return session
     }
 
-    public explorarCarta(
-        session: GameSession,
-        custoExploracao: 1 | 2 | 3
-    ): GameSession {
+    public explorarCarta(session: GameSession): GameSession {
         const custo = this.calcularCusto(session, 'Explorar')
         this.consumirPH(session, custo)
         return session
@@ -128,7 +178,7 @@ export class ActionManager {
 
     public resolverEnigma(
         session: GameSession,
-        enigmaCusto: 0 | 1 | 2 | 3,
+        enigmaCusto: number,
         ajusteHeroi: number = 0
     ): GameSession {
         const descontoEvento =
@@ -156,22 +206,30 @@ export class ActionManager {
         playerId: string,
         destinoId: string
     ): GameSession {
+        const eventoGratuito = this.isEventFirstMoveFree(session, playerId)
+        const heroGratuito = this.isHeroMoveFree(session, playerId)
         const player = this.getPlayer(session, playerId)
-        const custo = this.calcularCusto(session, 'SaltoLivre')
+        const custo = this.calcularCusto(session, 'SaltoLivre', 1, playerId)
         this.consumirPH(session, custo)
         player.posicao = destinoId
+        if (eventoGratuito) {
+            this.markEventFirstMoveUsed(session, playerId)
+        }
+        if (heroGratuito) {
+            session.movimentoGratisHeroiPorJogador[playerId] = false
+        }
         return session
     }
 
-    // Verificar se PH chegou a 0 e forçar desafio final
+    // Verificar se PH chegou a 0 e forcar desafio final
     public verificarFimDeJogo(session: GameSession): boolean {
         if (session.ph <= 0 && !session.jogoFinalizado) {
-            return true // Deve forçar o desafio final
+            return true
         }
         return false
     }
 
-    // Avançar para o próximo jogador
+    // Avancar para o proximo jogador
     public avancarTurno(session: GameSession): void {
         if (session.listaJogadores.length === 0) return
         session.jogadorAtualIndex =

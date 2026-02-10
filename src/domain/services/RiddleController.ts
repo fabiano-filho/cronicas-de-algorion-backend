@@ -2,52 +2,16 @@ import { GameSession } from '../entities/GameSession'
 import { ActionManager } from './ActionManager'
 
 export type RiddleQuality = 'otima' | 'ruim'
+type HouseCostResolver = (houseId: string) => 0 | 1 | 2 | 3
 
 export class RiddleController {
-    private casas: Record<string, { nome: string; custoPH: 0 | 1 | 2 | 3 }> = {
-        C1: {
-            nome: 'Biblioteca dos Mil Mestres',
-            custoPH: 2
-        },
-        C2: {
-            nome: 'Masmorra do Dragão',
-            custoPH: 1
-        },
-        C3: {
-            nome: 'Jardim das Sementes-Mãe',
-            custoPH: 1
-        },
-        C4: {
-            nome: 'Mercado das Mil Vozes',
-            custoPH: 2
-        },
-        C5: {
-            nome: 'Bosque dos Ramos Rebeldes',
-            custoPH: 0
-        },
-        C6: {
-            nome: 'Arena dos Homens-Peixe',
-            custoPH: 3
-        },
-        C7: {
-            nome: 'Deserto do Decreto Final',
-            custoPH: 1
-        },
-        C8: {
-            nome: 'Castelo Flutuante',
-            custoPH: 3
-        },
-        C9: {
-            nome: 'Montanha da Perdição',
-            custoPH: 1
-        }
-    }
-
-    constructor(private actionManager: ActionManager) {}
+    constructor(
+        private actionManager: ActionManager,
+        private resolveHouseCost: HouseCostResolver = () => 1
+    ) {}
 
     public getCustoPH(casaId: string): 0 | 1 | 2 | 3 {
-        const casa = this.casas[casaId]
-        return (casa?.custoPH ?? 1) as 0 | 1 | 2 | 3
+        return this.resolveHouseCost(casaId)
     }
 
     public registrarResposta(
@@ -57,12 +21,11 @@ export class RiddleController {
             jogadorId?: string
         }
     ): void {
-        const casa = this.casas[input.casaId]
-        const custoPH = casa?.custoPH ?? 1
+        const custoPH = this.getCustoPH(input.casaId)
 
         session.riddlePendente = {
             casaId: input.casaId,
-            custoPH: custoPH as 0 | 1 | 2 | 3,
+            custoPH,
             jogadorId: input.jogadorId
         }
     }
@@ -76,7 +39,7 @@ export class RiddleController {
         }
         const casaId = session.riddlePendente.casaId
         session.riddlePendente = null
-
+        void quality
         return { casaId }
     }
 }

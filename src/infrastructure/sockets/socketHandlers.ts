@@ -5,34 +5,86 @@ import {
     PuzzleValidator,
     QualidadeResposta
 } from '../../domain/services/PuzzleValidator'
-import { GameSession, HintCard } from '../../domain/entities/GameSession'
+import {
+    GameSession,
+    HintCard,
+    type SessionCatalog
+} from '../../domain/entities/GameSession'
 import { Card } from '../../domain/entities/Card'
 import { Anao, Bruxa, Humano, Sereia } from '../../domain/entities/Hero'
 import { Player } from '../../domain/entities/Player'
 import { RiddleController } from '../../domain/services/RiddleController'
-import { saveSession, getSession, deleteSession } from './sessionStore'
+import {
+    saveSession,
+    getSession,
+    deleteSession,
+    markSessionDirty,
+    getSessionMasterId,
+    setSessionMasterId
+} from './sessionStore'
 import {
     getFinalRiddleFragment,
+    getHouseBaseCost,
     getHouseChallengeById,
     getHouseChallenges,
     getHouseTipFrontSource,
+    getInitialEventDeck,
+    getRuntimeEventCatalog,
+    getRuntimeGameConfig,
+    getRuntimeHeroCatalog,
+    getRuntimeHouseCatalog,
     toPublicHouseChallenge,
     type HouseChallenge,
     type HouseChallengePublic
 } from '../gameData/GameDataCache'
 
 const actionManager = new ActionManager()
-const eventService = new EventService()
 const puzzleValidator = new PuzzleValidator()
-const riddleController = new RiddleController(actionManager)
+const riddleController = new RiddleController(actionManager, getHouseBaseCost)
 
-const DECK_EVENTOS_INICIAL = [
-    'Fluxo Laminar',
-    'Eco do Contrato',
-    'Terreno Quebradiço',
-    'Atalho Efêmero',
-    'Névoa da Dúvida'
-]
+let eventServiceInstance: EventService | null = null
+
+function resolveEventService(): EventService {
+    if (!eventServiceInstance) {
+        throw new Error('EventService nao inicializado')
+    }
+    return eventServiceInstance
+}
+
+function buildInitialEventDeck(): string[] {
+    return [...getInitialEventDeck()]
+}
+
+function buildSessionCatalog(): SessionCatalog {
+    const runtimeEvents = getRuntimeEventCatalog()
+    return {
+        heroes: getRuntimeHeroCatalog().map(h => ({
+            id: h.id,
+            tipo: h.tipo,
+            nome: h.nome,
+            habilidade: h.habilidade,
+            descricao: h.descricao
+        })),
+        houses: getRuntimeHouseCatalog().map(h => ({
+            id: h.id,
+            nome: h.nome,
+            ordem: h.ordem,
+            hasTip: h.hasTip
+        })),
+        events: runtimeEvents.map(e => ({
+            id: e.id,
+            nome: e.nome,
+            descricao: e.descricao,
+            backSource: e.backSource
+        })),
+        gameConfig: getRuntimeGameConfig()
+    }
+}
+
+function ensureSessionCatalog(session: GameSession): void {
+    if (session.catalogo) return
+    session.catalogo = buildSessionCatalog()
+}
 
 // Contador global para IDs de cartas de pista
 let hintCardIdCounter = 1
@@ -160,6 +212,9 @@ function getOrPickHouseChallenge(
     session: GameSession,
     casaId: string
 ): HouseChallenge {
+    if (!session.desafioSelecionadoPorCasa) {
+        session.desafioSelecionadoPorCasa = {}
+    }
     const chosen = session.desafioSelecionadoPorCasa?.[casaId] ?? null
     if (chosen) {
         return getHouseChallengeById(chosen)
@@ -281,7 +336,7 @@ function resetSessionState(session: GameSession): void {
     session.fase = 'lobby'
     session.ph = 40
     session.rodadaAtual = 1
-    session.deckEventos = [...DECK_EVENTOS_INICIAL]
+    session.deckEventos = buildInitialEventDeck()
     session.estadoTabuleiro = buildInitialBoard()
     session.cronometro = 0
     session.eventoAtivo = null
@@ -302,6 +357,8 @@ function resetSessionState(session: GameSession): void {
     session.riddlePendente = null
     session.registrosEnigmas = {}
     session.desafioSelecionadoPorCasa = {}
+    session.enigmasExibidos = {}
+    ensureSessionCatalog(session)
 
     session.listaJogadores.forEach(player => {
         player.posicao = 'C5'
@@ -324,6 +381,8 @@ function buildHero(tipo: string) {
 }
 
 function emitEstado(io: Server, session: GameSession): void {
+    ensureSessionCatalog(session)
+    markSessionDirty(session.id)
     // Verificar se PH chegou a 0
     if (actionManager.verificarFimDeJogo(session)) {
         io.to(session.id).emit('forcar_desafio_final', {
@@ -360,6 +419,38 @@ function emitTurnoAtualizado(io: Server, session: GameSession): void {
     })
 }
 
+function isRespostaCarta5ObrigatoriaPendente(session: GameSession): boolean {
+    if (!isCarta5Revelada(session)) return false
+    if (session.registrosEnigmas?.C5) return false
+    const jogadorAtual = actionManager.getJogadorAtual(session)
+    if (!jogadorAtual) return false
+    return jogadorAtual.posicao === 'C5'
+}
+
+function emitDesafioCarta5Obrigatorio(io: Server, session: GameSession): void {
+    if (!isRespostaCarta5ObrigatoriaPendente(session)) return
+    const jogadorAtual = actionManager.getJogadorAtual(session)
+    if (!jogadorAtual?.id) return
+    io.to(session.id).emit('desafio_carta5_obrigatorio', {
+        jogadorId: jogadorAtual.id,
+        casaId: 'C5'
+    })
+}
+
+function assertRespostaCarta5Obrigatoria(
+    session: GameSession,
+    jogadorId: string
+): void {
+    if (!isCarta5Revelada(session)) return
+    if (session.registrosEnigmas?.C5) return
+    const jogadorAtual = actionManager.getJogadorAtual(session)
+    if (!jogadorAtual || jogadorAtual.id !== jogadorId) return
+    if (jogadorAtual.posicao !== 'C5') return
+    throw new Error(
+        'Carta C5 revelada: responda o desafio obrigatório da casa C5 antes de mover ou passar o turno.'
+    )
+}
+
 function iniciarProximoTurno(io: Server, session: GameSession): void {
     if (session.listaJogadores.length === 0) return
 
@@ -375,11 +466,12 @@ function iniciarProximoTurno(io: Server, session: GameSession): void {
 
     if (wrappedToNewRound) {
         session.rodadaAtual += 1
-        eventService.iniciarRodada(session)
+        resolveEventService().iniciarRodada(session)
         emitEventoAtivo(io, session)
     }
 
     emitTurnoAtualizado(io, session)
+    emitDesafioCarta5Obrigatorio(io, session)
 }
 
 function assertJogadorDaVez(session: GameSession, jogadorId: string): void {
@@ -405,14 +497,37 @@ function assertSemRespostaPendente(
     }
 }
 
+function getMestreRegistradoSessao(sessionId: string): string | null {
+    const mestreEmMemoria = mestreIdPorSessao.get(sessionId)
+    const mestrePersistido = getSessionMasterId(sessionId)
+    const mestreRegistrado = mestreEmMemoria ?? mestrePersistido ?? null
+
+    if (mestreRegistrado && mestreEmMemoria !== mestreRegistrado) {
+        mestreIdPorSessao.set(sessionId, mestreRegistrado)
+    }
+
+    return mestreRegistrado
+}
+
 function assertMestreDaSessao(sessionId: string, mestreId?: string): void {
-    const mestreRegistrado = mestreIdPorSessao.get(sessionId)
+    const mestreRegistrado = getMestreRegistradoSessao(sessionId)
+    if (!mestreRegistrado && mestreId) {
+        // Sessoes legadas (sem mestre persistido): vincula no primeiro comando valido.
+        mestreIdPorSessao.set(sessionId, mestreId)
+        setSessionMasterId(sessionId, mestreId)
+        return
+    }
+
     if (!mestreId || !mestreRegistrado || mestreRegistrado !== mestreId) {
         throw new Error('Apenas o Mestre pode executar esta ação.')
     }
 }
 
-export function registerSocketHandlers(io: Server): void {
+export function registerSocketHandlers(
+    io: Server,
+    service: EventService
+): void {
+    eventServiceInstance = service
     io.on('connection', (socket: Socket) => {
         // Verificar se uma sessão existe
         socket.on(
@@ -445,10 +560,11 @@ export function registerSocketHandlers(io: Server): void {
                     id: sessionId,
                     ph: 40,
                     rodadaAtual: 1,
-                    deckEventos: [...DECK_EVENTOS_INICIAL],
+                    deckEventos: buildInitialEventDeck(),
                     estadoTabuleiro: buildInitialBoard(),
                     cronometro: 0,
-                    listaJogadores: []
+                    listaJogadores: [],
+                    catalogo: buildSessionCatalog()
                 })
                 session.fase = 'lobby'
 
@@ -456,9 +572,10 @@ export function registerSocketHandlers(io: Server): void {
                 session.puzzleDeck.drawPile = buildShuffledPuzzleDeck()
                 session.puzzleDeck.assignedByHouse = {}
 
-                eventService.iniciarRodada(session)
+                resolveEventService().iniciarRodada(session)
                 saveSession(session)
                 mestreIdPorSessao.set(sessionId, mestreId)
+                setSessionMasterId(sessionId, mestreId)
                 socket.join(sessionId)
                 emitEstado(io, session)
                 emitEventoAtivo(io, session)
@@ -490,6 +607,36 @@ export function registerSocketHandlers(io: Server): void {
             }
         )
 
+        socket.on(
+            'editar_ph',
+            ({
+                sessionId,
+                mestreId,
+                novoPh
+            }: {
+                sessionId: string
+                mestreId: string
+                novoPh: number
+            }) => {
+                const session = getSession(sessionId)
+                if (!session) return
+
+                try {
+                    assertMestreDaSessao(sessionId, mestreId)
+                    const ph = Number(novoPh)
+                    if (!Number.isFinite(ph) || ph < 0) {
+                        throw new Error('Valor de PH invalido')
+                    }
+                    session.ph = Math.floor(ph)
+                    emitEstado(io, session)
+                } catch (error) {
+                    socket.emit('acao_negada', {
+                        motivo: (error as Error).message
+                    })
+                }
+            }
+        )
+
         // Compat: "avancar_rodada" avança o turno.
         // A rodada (e o evento) só avançam quando o turno volta ao primeiro jogador.
         socket.on('avancar_rodada', ({ sessionId }: { sessionId: string }) => {
@@ -498,6 +645,18 @@ export function registerSocketHandlers(io: Server): void {
             if (session.jogoFinalizado) {
                 socket.emit('acao_negada', { motivo: 'Jogo já finalizado' })
                 return
+            }
+
+            const jogadorAtual = actionManager.getJogadorAtual(session)
+            if (jogadorAtual?.id) {
+                try {
+                    assertRespostaCarta5Obrigatoria(session, jogadorAtual.id)
+                } catch (error) {
+                    socket.emit('acao_negada', {
+                        motivo: (error as Error).message
+                    })
+                    return
+                }
             }
 
             iniciarProximoTurno(io, session)
@@ -614,7 +773,7 @@ export function registerSocketHandlers(io: Server): void {
                     return
                 }
 
-                const mestreId = mestreIdPorSessao.get(sessionId) ?? null
+                const mestreId = getMestreRegistradoSessao(sessionId)
                 const isMestre = !!mestreId && mestreId === jogadorId
                 if (isMestre) {
                     // Sem mestre, a sessÃ£o nÃ£o existe. Notificar todos e encerrar.
@@ -679,7 +838,10 @@ export function registerSocketHandlers(io: Server): void {
                     jogadores: session.listaJogadores
                 })
 
-                if (session.fase === 'jogo' && session.listaJogadores.length === 0) {
+                if (
+                    session.fase === 'jogo' &&
+                    session.listaJogadores.length === 0
+                ) {
                     session.fase = 'lobby'
                     io.to(session.id).emit('sessao_sem_jogadores', {
                         sessionId,
@@ -732,8 +894,9 @@ export function registerSocketHandlers(io: Server): void {
                 const session = getSession(sessionId)
                 if (!session) return
 
-                const mestreRegistrado = mestreIdPorSessao.get(sessionId)
-                if (mestreRegistrado && mestreRegistrado !== mestreId) {
+                try {
+                    assertMestreDaSessao(sessionId, mestreId)
+                } catch {
                     socket.emit('acao_negada', {
                         motivo: 'Apenas o Mestre pode iniciar o jogo.'
                     })
@@ -928,8 +1091,9 @@ export function registerSocketHandlers(io: Server): void {
                 const session = getSession(sessionId)
                 if (!session) return
 
-                const mestreRegistrado = mestreIdPorSessao.get(sessionId)
-                if (mestreRegistrado && mestreRegistrado !== mestreId) {
+                try {
+                    assertMestreDaSessao(sessionId, mestreId)
+                } catch {
                     socket.emit('acao_negada', {
                         motivo: 'Apenas o Mestre pode remover jogadores.'
                     })
@@ -1008,23 +1172,24 @@ export function registerSocketHandlers(io: Server): void {
                 sessionId: string
                 mestreId: string
             }) => {
-            const session = getSession(sessionId)
-            if (!session) return
+                const session = getSession(sessionId)
+                if (!session) return
 
-            try {
-                assertMestreDaSessao(sessionId, mestreId)
-                const { row, col } = getBoardCoordsFromCasaId('C5')
-                const card = session.estadoTabuleiro?.[row]?.[col] ?? null
-                if (card && !card.revelada) {
-                    card.revelada = true
+                try {
+                    assertMestreDaSessao(sessionId, mestreId)
+                    const { row, col } = getBoardCoordsFromCasaId('C5')
+                    const card = session.estadoTabuleiro?.[row]?.[col] ?? null
+                    if (card && !card.revelada) {
+                        card.revelada = true
+                    }
+                    emitEstado(io, session)
+                    emitDesafioCarta5Obrigatorio(io, session)
+                } catch (error) {
+                    socket.emit('acao_negada', {
+                        motivo: (error as Error).message
+                    })
                 }
-                emitEstado(io, session)
-            } catch (error) {
-                socket.emit('acao_negada', {
-                    motivo: (error as Error).message
-                })
             }
-        }
         )
 
         // Mestre: reiniciar sessão
@@ -1058,7 +1223,7 @@ export function registerSocketHandlers(io: Server): void {
                         by: 'mestre'
                     })
 
-                    eventService.iniciarRodada(session)
+                    resolveEventService().iniciarRodada(session)
                     io.to(session.id).emit('lobby_atualizado', {
                         jogadores: session.listaJogadores
                     })
@@ -1114,8 +1279,7 @@ export function registerSocketHandlers(io: Server): void {
                 const pendente = session.riddlePendente
                 if (!isCasa5 && (!pendente || pendente.casaId !== casaId)) {
                     socket.emit('acao_negada', {
-                        motivo:
-                            'Nenhum desafio em andamento para essa casa. Aguarde o jogador escolher responder.'
+                        motivo: 'Nenhum desafio em andamento para essa casa. Aguarde o jogador escolher responder.'
                     })
                     return
                 }
@@ -1134,6 +1298,12 @@ export function registerSocketHandlers(io: Server): void {
                     const desafioPublic = toPublicHouseChallenge(desafio)
                     const textoExibicao = buildTextoDesafio(desafioPublic)
 
+                    if (!session.enigmasExibidos) {
+                        session.enigmasExibidos = {}
+                    }
+                    session.enigmasExibidos[casaId] = true
+                    emitEstado(io, session)
+
                     io.to(session.id).emit('enigma_exibido', {
                         casaId,
                         texto: textoExibicao,
@@ -1148,10 +1318,54 @@ export function registerSocketHandlers(io: Server): void {
                         return
                     }
 
+                    if (!session.enigmasExibidos) {
+                        session.enigmasExibidos = {}
+                    }
+                    session.enigmasExibidos[casaId] = true
+                    emitEstado(io, session)
+
                     // Fallback (legado): permite exibir texto livre se informado.
                     io.to(session.id).emit('enigma_exibido', {
                         casaId,
                         texto: textoNormalizado
+                    })
+                }
+            }
+        )
+
+        socket.on(
+            'consultar_historia',
+            ({
+                sessionId,
+                jogadorId,
+                casaId
+            }: {
+                sessionId: string
+                jogadorId: string
+                casaId: string
+            }) => {
+                const session = getSession(sessionId)
+                if (!session) return
+
+                if (!session.enigmasExibidos?.[casaId]) {
+                    socket.emit('acao_negada', {
+                        motivo: 'O mestre ainda não exibiu o desafio dessa casa.'
+                    })
+                    return
+                }
+
+                try {
+                    const desafio = getOrPickHouseChallenge(session, casaId)
+                    const desafioPublic = toPublicHouseChallenge(desafio)
+                    const textoExibicao = buildTextoDesafio(desafioPublic)
+
+                    socket.emit('historia_consultada', {
+                        casaId,
+                        texto: textoExibicao
+                    })
+                } catch (error) {
+                    socket.emit('acao_negada', {
+                        motivo: (error as Error).message
                     })
                 }
             }
@@ -1180,6 +1394,7 @@ export function registerSocketHandlers(io: Server): void {
                     assertJogadorDaVez(session, jogadorId)
                     assertSemRespostaPendente(session, jogadorId)
                     assertCarta5ReveladaParaMover(session)
+                    assertRespostaCarta5Obrigatoria(session, jogadorId)
                     actionManager.moverPeao(session, jogadorId, destinoId)
                     emitEstado(io, session)
                 } catch (error) {
@@ -1231,7 +1446,7 @@ export function registerSocketHandlers(io: Server): void {
                     )
                     card.revelada = true
 
-                    actionManager.explorarCarta(session, 1)
+                    actionManager.explorarCarta(session)
                     emitEstado(io, session)
                 } catch (error) {
                     socket.emit('acao_negada', {
@@ -1289,21 +1504,6 @@ export function registerSocketHandlers(io: Server): void {
                         throw new Error(
                             'Já existe uma charada pendente para validação do Mestre.'
                         )
-                    }
-
-                    if (
-                        player.hero.tipo === 'Sereia' &&
-                        !session.habilidadesUsadasPorJogador[jogadorId]
-                    ) {
-                        io.to(session.id).emit('habilidade_usada', {
-                            jogador: { id: player.id, nome: player.nome },
-                            heroi: 'Sereia'
-                        })
-                        io.to(session.id).emit('sinal_dica_sutil', {
-                            jogadorId,
-                            heroi: 'Sereia'
-                        })
-                        session.habilidadesUsadasPorJogador[jogadorId] = true
                     }
 
                     // Regra: ao clicar para responder, o custo da casa é pago imediatamente.
@@ -1505,10 +1705,12 @@ export function registerSocketHandlers(io: Server): void {
             'usar_habilidade_heroi',
             ({
                 sessionId,
-                jogadorId
+                jogadorId,
+                casaId
             }: {
                 sessionId: string
                 jogadorId: string
+                casaId?: string
             }) => {
                 const session = getSession(sessionId)
                 if (!session) return
@@ -1520,19 +1722,9 @@ export function registerSocketHandlers(io: Server): void {
                     p => p.id === jogadorId
                 )
                 if (!player) return
-                try {
-                    assertJogadorDaVez(session, jogadorId)
-                    assertSemRespostaPendente(session, jogadorId)
-                } catch (error) {
-                    socket.emit('acao_negada', {
-                        motivo: (error as Error).message
-                    })
-                    return
-                }
                 if (!isCarta5Revelada(session)) {
                     socket.emit('acao_negada', {
-                        motivo:
-                            'A carta C5 precisa estar revelada pelo Mestre antes de iniciar as ações.'
+                        motivo: 'A carta C5 precisa estar revelada pelo Mestre antes de iniciar as ações.'
                     })
                     return
                 }
@@ -1582,11 +1774,42 @@ export function registerSocketHandlers(io: Server): void {
                         session.movimentoGratisHeroiPorJogador[jogadorId] = true
                         session.habilidadesUsadasPorJogador[jogadorId] = true
                         break
-                    case 'Sereia':
-                        socket.emit('acao_negada', {
-                            motivo: 'A habilidade da Sereia só pode ser usada ao responder um enigma.'
+                    case 'Sereia': {
+                        if (!casaId) {
+                            socket.emit('acao_negada', {
+                                motivo: 'Selecione um desafio para usar a habilidade da Sereia.'
+                            })
+                            return
+                        }
+                        let card = null
+                        try {
+                            const { row, col } =
+                                getBoardCoordsFromCasaId(casaId)
+                            card = session.estadoTabuleiro?.[row]?.[col] ?? null
+                        } catch (error) {
+                            socket.emit('acao_negada', {
+                                motivo: 'Casa inválida para aplicar a habilidade da Sereia.'
+                            })
+                            return
+                        }
+                        if (!card || !card.revelada) {
+                            socket.emit('acao_negada', {
+                                motivo: 'Selecione um desafio já revelado para usar a habilidade da Sereia.'
+                            })
+                            return
+                        }
+                        io.to(session.id).emit('habilidade_usada', {
+                            jogador: { id: player.id, nome: player.nome },
+                            heroi: 'Sereia'
                         })
-                        return
+                        io.to(session.id).emit('sinal_dica_sutil', {
+                            jogadorId,
+                            heroi: 'Sereia',
+                            casaId
+                        })
+                        session.habilidadesUsadasPorJogador[jogadorId] = true
+                        break
+                    }
                     case 'Bruxa': {
                         const key = bruxaKey(sessionId, jogadorId)
                         if (bruxaEscolhaPendente.has(key)) {
@@ -1650,16 +1873,6 @@ export function registerSocketHandlers(io: Server): void {
                     p => p.id === jogadorId
                 )
                 if (!player) return
-
-                try {
-                    assertJogadorDaVez(session, jogadorId)
-                    assertSemRespostaPendente(session, jogadorId)
-                } catch (error) {
-                    socket.emit('acao_negada', {
-                        motivo: (error as Error).message
-                    })
-                    return
-                }
 
                 if (player.hero.tipo !== 'Bruxa') {
                     socket.emit('acao_negada', {
@@ -1784,6 +1997,7 @@ export function registerSocketHandlers(io: Server): void {
                     assertJogadorDaVez(session, jogadorId)
                     assertSemRespostaPendente(session, jogadorId)
                     assertCarta5ReveladaParaMover(session)
+                    assertRespostaCarta5Obrigatoria(session, jogadorId)
                     actionManager.saltoLivre(session, jogadorId, destinoId)
                     emitEstado(io, session)
                 } catch (error) {
@@ -1829,21 +2043,6 @@ export function registerSocketHandlers(io: Server): void {
                     )
                     if (!player) {
                         throw new Error('Jogador não encontrado')
-                    }
-
-                    if (
-                        player.hero.tipo === 'Sereia' &&
-                        !session.habilidadesUsadasPorJogador[jogadorId]
-                    ) {
-                        io.to(session.id).emit('habilidade_usada', {
-                            jogador: { id: player.id, nome: player.nome },
-                            heroi: 'Sereia'
-                        })
-                        io.to(session.id).emit('sinal_dica_sutil', {
-                            jogadorId,
-                            heroi: 'Sereia'
-                        })
-                        session.habilidadesUsadasPorJogador[jogadorId] = true
                     }
 
                     const casaId = player.posicao
@@ -1909,6 +2108,18 @@ export function registerSocketHandlers(io: Server): void {
             if (session.jogoFinalizado) {
                 socket.emit('acao_negada', { motivo: 'Jogo já finalizado' })
                 return
+            }
+
+            const jogadorAtual = actionManager.getJogadorAtual(session)
+            if (jogadorAtual?.id) {
+                try {
+                    assertRespostaCarta5Obrigatoria(session, jogadorAtual.id)
+                } catch (error) {
+                    socket.emit('acao_negada', {
+                        motivo: (error as Error).message
+                    })
+                    return
+                }
             }
 
             iniciarProximoTurno(io, session)

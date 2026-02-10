@@ -89,7 +89,7 @@
         {
             "id": "C1",
             "name": "Biblioteca dos Mil Mestres",
-            "base_cost": 2,
+            "base_cost": 1,
             "riddle_theme": "Classes Abstratas",
             "tip_front_source": "assets/cards/tips/1-front-biblioteca.png",
             "final_riddle_lines": {
@@ -100,7 +100,7 @@
         {
             "id": "C2",
             "name": "Masmorra do Dragão",
-            "base_cost": 1,
+            "base_cost": 3,
             "riddle_theme": "Polimorfismo",
             "tip_front_source": "assets/cards/tips/2-front-masmorra.png",
             "final_riddle_lines": {
@@ -151,7 +151,7 @@
         {
             "id": "C7",
             "name": "Deserto do Decreto Final",
-            "base_cost": 1,
+            "base_cost": 3,
             "riddle_theme": "Métodos Final / Sealed (Imutabilidade)",
             "tip_front_source": "assets/cards/tips/7-front-deserto.png",
             "final_riddle_lines": {
@@ -173,7 +173,7 @@
         {
             "id": "C9",
             "name": "Montanha da Perdição",
-            "base_cost": 1,
+            "base_cost": 2,
             "riddle_theme": "Substituição de Liskov / Contratos",
             "tip_front_source": "assets/cards/tips/9-front-arena.png",
             "final_riddle_lines": {
