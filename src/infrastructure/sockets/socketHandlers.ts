@@ -1895,7 +1895,8 @@ export function registerSocketHandlers(
                 // Impedir reativação enquanto a habilidade já estiver ativa (desconto/grátis pendente)
                 const abilityAlreadyActive =
                     (session.descontoEnigmaHeroiPorJogador[jogadorId] ?? 0) !== 0 ||
-                    !!session.movimentoGratisHeroiPorJogador[jogadorId]
+                    !!session.movimentoGratisHeroiPorJogador[jogadorId] ||
+                    session.sereiaAbilityActive === jogadorId
                 if (abilityAlreadyActive) {
                     socket.emit('acao_negada', {
                         motivo: 'Habilidade já está ativa'
@@ -1942,11 +1943,16 @@ export function registerSocketHandlers(
                         break
                     case 'Sereia': {
                         if (!casaId) {
-                            socket.emit('acao_negada', {
-                                motivo: 'Selecione um desafio para usar a habilidade da Sereia.'
+                            // Ativar habilidade da Sereia (sem casa selecionada)
+                            session.sereiaAbilityActive = jogadorId
+                            io.to(session.id).emit('habilidade_usada', {
+                                jogador: { id: player.id, nome: player.nome },
+                                heroi: 'Sereia'
                             })
+                            emitEstado(io, session)
                             return
                         }
+                        // Seleção direta com casaId
                         let card = null
                         try {
                             const { row, col } =
@@ -1973,6 +1979,7 @@ export function registerSocketHandlers(
                             heroi: 'Sereia',
                             casaId
                         })
+                        session.sereiaAbilityActive = null
                         session.habilidadesUsadasPorJogador[jogadorId] = true
                         break
                     }
@@ -2011,6 +2018,58 @@ export function registerSocketHandlers(
                     }
                 }
 
+                emitEstado(io, session)
+            }
+        )
+
+        // Sereia: qualquer jogador pode selecionar a casa alvo quando a habilidade está ativa
+        socket.on(
+            'selecionar_casa_sereia',
+            ({
+                sessionId,
+                casaId
+            }: {
+                sessionId: string
+                casaId: string
+            }) => {
+                const session = getSession(sessionId)
+                if (!session) return
+                if (!session.sereiaAbilityActive) {
+                    socket.emit('acao_negada', {
+                        motivo: 'A habilidade da Sereia não está ativa.'
+                    })
+                    return
+                }
+                const sereiaJogadorId = session.sereiaAbilityActive
+                const sereiaPlayer = session.listaJogadores.find(
+                    p => p.id === sereiaJogadorId
+                )
+                if (!sereiaPlayer) return
+
+                let card = null
+                try {
+                    const { row, col } = getBoardCoordsFromCasaId(casaId)
+                    card = session.estadoTabuleiro?.[row]?.[col] ?? null
+                } catch (error) {
+                    socket.emit('acao_negada', {
+                        motivo: 'Casa inválida para aplicar a habilidade da Sereia.'
+                    })
+                    return
+                }
+                if (!card || !card.revelada) {
+                    socket.emit('acao_negada', {
+                        motivo: 'Selecione um desafio já revelado para usar a habilidade da Sereia.'
+                    })
+                    return
+                }
+
+                io.to(session.id).emit('sinal_dica_sutil', {
+                    jogadorId: sereiaJogadorId,
+                    heroi: 'Sereia',
+                    casaId
+                })
+                session.sereiaAbilityActive = null
+                session.habilidadesUsadasPorJogador[sereiaJogadorId] = true
                 emitEstado(io, session)
             }
         )

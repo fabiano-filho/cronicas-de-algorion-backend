@@ -115,6 +115,7 @@ export class GameSession {
     public movimentoGratisHeroiPorJogador: Record<string, boolean> = {}
     public descontoEnigmaHeroiPorJogador: Record<string, number> = {}
     public habilidadesUsadasPorJogador: Record<string, boolean> = {}
+    public sereiaAbilityActive: string | null = null // jogadorId da Sereia quando ativa
 
     // Deck de cartas de pista coletadas (para arrastar no frontend)
     public deckPistas: HintCard[] = []
