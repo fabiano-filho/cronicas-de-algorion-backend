@@ -47,6 +47,23 @@ function normalizeSession(raw: any): GameSession | null {
     if (!Array.isArray(raw.deckPistas)) {
         raw.deckPistas = []
     }
+    if (!isRecord(raw.hintVariantsByHouse)) {
+        raw.hintVariantsByHouse = {}
+    }
+    for (const key of Object.keys(raw.hintVariantsByHouse)) {
+        if (!Array.isArray(raw.hintVariantsByHouse[key])) {
+            raw.hintVariantsByHouse[key] = []
+        }
+    }
+    if (!isRecord(raw.activeHintVariantBySlot)) {
+        raw.activeHintVariantBySlot = {}
+    }
+    if (!isRecord(raw.pedidosDicaEnigmaFinalPorJogador)) {
+        raw.pedidosDicaEnigmaFinalPorJogador = {}
+    }
+    if (typeof raw.carta5ViradaPeloMestre !== 'boolean') {
+        raw.carta5ViradaPeloMestre = false
+    }
     if (!isRecord(raw.puzzleDeck)) {
         raw.puzzleDeck = { drawPile: [], assignedByHouse: {} }
     }
@@ -178,6 +195,16 @@ export function setSessionMasterId(sessionId: string, mestreId: string): void {
 export function markSessionDirty(sessionId: string): void {
     if (!sessions.has(sessionId)) return
     schedulePersist(sessionId)
+}
+
+export async function persistSessionImmediately(sessionId: string): Promise<void> {
+    if (!sessions.has(sessionId)) return
+    const timer = pendingPersistTimers.get(sessionId)
+    if (timer) {
+        clearTimeout(timer)
+        pendingPersistTimers.delete(sessionId)
+    }
+    await persistSessionNow(sessionId)
 }
 
 export function deleteSession(sessionId: string): void {

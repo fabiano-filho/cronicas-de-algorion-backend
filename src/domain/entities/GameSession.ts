@@ -85,6 +85,10 @@ export interface GameSessionProps {
     cronometro: number // segundos
     listaJogadores: Player[]
     slotsEnigmaFinal?: HintSlot[]
+    hintVariantsByHouse?: Record<string, HintCard[]>
+    activeHintVariantBySlot?: Record<string, string>
+    pedidosDicaEnigmaFinalPorJogador?: Record<string, boolean>
+    carta5ViradaPeloMestre?: boolean
     catalogo?: SessionCatalog
 }
 
@@ -124,6 +128,18 @@ export class GameSession {
     // Slots para montar o enigma final (8 slots, um por casa exceto C5)
     public slotsEnigmaFinal: HintSlot[] = buildDefaultFinalSlots()
 
+    // Histórico de variantes de pistas por casa (easy/hard e futuras variantes)
+    public hintVariantsByHouse: Record<string, HintCard[]> = {}
+
+    // Variante ativa selecionada por slot do enigma final (slotIndex -> variantId)
+    public activeHintVariantBySlot: Record<string, string> = {}
+
+    // Controle: cada jogador pode pedir dica do enigma final apenas uma vez
+    public pedidosDicaEnigmaFinalPorJogador: Record<string, boolean> = {}
+
+    // Controle de uso da ação do mestre para virar a C5
+    public carta5ViradaPeloMestre: boolean = false
+
     // Texto montado do enigma final (atualizado quando slots são preenchidos)
     public textoEnigmaFinalMontado: string = ''
 
@@ -136,14 +152,15 @@ export class GameSession {
         easy: string[]
         hard: string[]
     } = {
-        easy: [],
-        hard: []
-    }
+            easy: [],
+            hard: []
+        }
     public riddlePendente: {
         casaId: string
         custoPH: number
         jogadorId?: string
         isRetry?: boolean
+        texto?: string
     } | null = null
     public registrosEnigmas: Record<string, 'SucessoOtimo' | 'Bom' | 'Ruim'> =
         {}
@@ -162,6 +179,11 @@ export class GameSession {
             props.slotsEnigmaFinal && props.slotsEnigmaFinal.length === 8
                 ? props.slotsEnigmaFinal
                 : buildDefaultFinalSlots()
+        this.hintVariantsByHouse = props.hintVariantsByHouse ?? {}
+        this.activeHintVariantBySlot = props.activeHintVariantBySlot ?? {}
+        this.pedidosDicaEnigmaFinalPorJogador =
+            props.pedidosDicaEnigmaFinalPorJogador ?? {}
+        this.carta5ViradaPeloMestre = !!props.carta5ViradaPeloMestre
         this.catalogo = props.catalogo ?? null
     }
 }

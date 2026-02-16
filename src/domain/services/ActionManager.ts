@@ -42,7 +42,7 @@ export class ActionManager {
     constructor(
         private resolveActionCosts: () => ActionBaseCosts = () =>
             DEFAULT_ACTION_COSTS
-    ) {}
+    ) { }
 
     private getActionCosts(): ActionBaseCosts {
         const costs = this.resolveActionCosts?.() ?? DEFAULT_ACTION_COSTS
@@ -166,6 +166,7 @@ export class ActionManager {
         }
         if (heroGratuito) {
             session.movimentoGratisHeroiPorJogador[playerId] = false
+            session.habilidadesUsadasPorJogador[playerId] = true
         }
         return session
     }
@@ -183,7 +184,7 @@ export class ActionManager {
     ): GameSession {
         const descontoEvento =
             session.eventoAtivo?.modificadores?.primeiroEnigmaDesconto &&
-            !session.primeiroEnigmaDescontoUsado
+                !session.primeiroEnigmaDescontoUsado
                 ? session.eventoAtivo.modificadores.primeiroEnigmaDesconto
                 : 0
         const custoBase = enigmaCusto + descontoEvento
@@ -217,6 +218,7 @@ export class ActionManager {
         }
         if (heroGratuito) {
             session.movimentoGratisHeroiPorJogador[playerId] = false
+            session.habilidadesUsadasPorJogador[playerId] = true
         }
         return session
     }

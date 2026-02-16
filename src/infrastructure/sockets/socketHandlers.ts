@@ -19,6 +19,7 @@ import {
     getSession,
     deleteSession,
     markSessionDirty,
+    persistSessionImmediately,
     getSessionMasterId,
     setSessionMasterId
 } from './sessionStore'
@@ -184,7 +185,7 @@ function getCustoEnigmaSemHeroi(session: GameSession, casaId: string): number {
     const custoCasa = riddleController.getCustoPH(casaId)
     const descontoEvento =
         session.eventoAtivo?.modificadores?.primeiroEnigmaDesconto &&
-        !session.primeiroEnigmaDescontoUsado
+            !session.primeiroEnigmaDescontoUsado
             ? session.eventoAtivo.modificadores.primeiroEnigmaDesconto
             : 0
     return Math.max(0, custoCasa + descontoEvento)
@@ -198,6 +199,10 @@ function isCarta5Revelada(session: GameSession): boolean {
     } catch {
         return false
     }
+}
+
+function isCarta5JaViradaPeloMestre(session: GameSession): boolean {
+    return !!session.carta5ViradaPeloMestre || isCarta5Revelada(session)
 }
 
 function assertCarta5ReveladaParaMover(session: GameSession): void {
@@ -248,6 +253,70 @@ function buildTextoDesafio(desafio: HouseChallengePublic): string {
 
 function generateHintCardId(): string {
     return `hint_${hintCardIdCounter++}`
+}
+
+function getHintVariantId(card: Pick<HintCard, 'id' | 'tipo' | 'source'>): string {
+    return `${card.id}::${card.tipo}::${card.source}`
+}
+
+function ensureHintState(session: GameSession): void {
+    if (!session.hintVariantsByHouse) {
+        session.hintVariantsByHouse = {}
+    }
+    if (!session.activeHintVariantBySlot) {
+        session.activeHintVariantBySlot = {}
+    }
+}
+
+function registerHintVariant(session: GameSession, card: HintCard): void {
+    ensureHintState(session)
+    const variants = session.hintVariantsByHouse[card.casaId] || []
+    const variantId = getHintVariantId(card)
+    const idx = variants.findIndex(v => getHintVariantId(v) === variantId)
+    if (idx >= 0) {
+        variants[idx] = { ...card }
+    } else {
+        variants.push({ ...card })
+    }
+    session.hintVariantsByHouse[card.casaId] = variants
+}
+
+function getHintCardById(session: GameSession, cardId: string): HintCard | null {
+    return session.deckPistas.find(card => card.id === cardId) || null
+}
+
+function isVariantValidForSlotCard(
+    session: GameSession,
+    slotIndex: number,
+    variantId: string | null | undefined
+): boolean {
+    if (!variantId) return false
+    const slot = session.slotsEnigmaFinal[slotIndex]
+    const cardId = slot?.cardId
+    if (!cardId) return false
+    const slotCard = getHintCardById(session, cardId)
+    if (!slotCard?.casaId) return false
+    const variants = session.hintVariantsByHouse?.[slotCard.casaId] || []
+    return variants.some(variant => getHintVariantId(variant) === variantId)
+}
+
+function pruneActiveHintVariants(session: GameSession): void {
+    ensureHintState(session)
+    for (const key of Object.keys(session.activeHintVariantBySlot)) {
+        const slotIndex = Number(key)
+        if (
+            !Number.isInteger(slotIndex) ||
+            slotIndex < 0 ||
+            slotIndex >= session.slotsEnigmaFinal.length ||
+            !isVariantValidForSlotCard(
+                session,
+                slotIndex,
+                session.activeHintVariantBySlot[key]
+            )
+        ) {
+            delete session.activeHintVariantBySlot[key]
+        }
+    }
 }
 
 function buildShuffledPuzzleDeck(): number[] {
@@ -346,6 +415,10 @@ function resetSessionState(session: GameSession): void {
     session.descontoEnigmaHeroiPorJogador = {}
     session.habilidadesUsadasPorJogador = {}
     session.deckPistas = []
+    session.hintVariantsByHouse = {}
+    session.activeHintVariantBySlot = {}
+    session.pedidosDicaEnigmaFinalPorJogador = {}
+    session.carta5ViradaPeloMestre = false
     session.puzzleDeck.drawPile = buildShuffledPuzzleDeck()
     session.puzzleDeck.assignedByHouse = {}
     session.slotsEnigmaFinal = buildEmptySlotsEnigmaFinal()
@@ -392,7 +465,23 @@ function emitEstado(io: Server, session: GameSession): void {
             textoEnigmaFinalMontado: session.textoEnigmaFinalMontado
         })
     }
-    io.to(session.id).emit('estado_atualizado', session)
+    // Incluir desafioFinalJogadorId para restauração no frontend após refresh
+    const desafioFinalJogadorId = desafioFinalPendentePorSessao.get(session.id) ?? null
+    io.to(session.id).emit('estado_atualizado', {
+        ...session,
+        desafioFinalJogadorId
+    })
+}
+
+async function persistHintProgress(sessionId: string): Promise<void> {
+    try {
+        await persistSessionImmediately(sessionId)
+    } catch (error) {
+        console.error(
+            `[socketHandlers] Erro ao persistir progresso de pistas da sessao ${sessionId}:`,
+            error
+        )
+    }
 }
 
 function emitEventoAtivo(io: Server, session: GameSession): void {
@@ -400,10 +489,10 @@ function emitEventoAtivo(io: Server, session: GameSession): void {
         'evento_ativo',
         session.eventoAtivo
             ? {
-                  nome: session.eventoAtivo.nome,
-                  descricao: session.eventoAtivo.descricao,
-                  modificadores: session.eventoAtivo.modificadores
-              }
+                nome: session.eventoAtivo.nome,
+                descricao: session.eventoAtivo.descricao,
+                modificadores: session.eventoAtivo.modificadores
+            }
             : null
     )
 }
@@ -1165,7 +1254,7 @@ export function registerSocketHandlers(
         // Mestre: virar carta 5
         socket.on(
             'virar_carta5',
-            ({
+            async ({
                 sessionId,
                 mestreId
             }: {
@@ -1177,12 +1266,19 @@ export function registerSocketHandlers(
 
                 try {
                     assertMestreDaSessao(sessionId, mestreId)
+                    if (isCarta5JaViradaPeloMestre(session)) {
+                        throw new Error(
+                            'A carta C5 já foi virada nesta sessão. Reinicie a sessão para virar novamente.'
+                        )
+                    }
                     const { row, col } = getBoardCoordsFromCasaId('C5')
                     const card = session.estadoTabuleiro?.[row]?.[col] ?? null
                     if (card && !card.revelada) {
                         card.revelada = true
                     }
+                    session.carta5ViradaPeloMestre = true
                     emitEstado(io, session)
+                    await persistSessionImmediately(session.id)
                     emitDesafioCarta5Obrigatorio(io, session)
                 } catch (error) {
                     socket.emit('acao_negada', {
@@ -1519,9 +1615,9 @@ export function registerSocketHandlers(
                     const descontoEvento =
                         session.eventoAtivo?.modificadores
                             ?.primeiroEnigmaDesconto &&
-                        !session.primeiroEnigmaDescontoUsado
+                            !session.primeiroEnigmaDescontoUsado
                             ? session.eventoAtivo.modificadores
-                                  .primeiroEnigmaDesconto
+                                .primeiroEnigmaDesconto
                             : 0
                     const custoBase = custoCasa
                     const custoCobrado = Math.max(
@@ -1536,6 +1632,9 @@ export function registerSocketHandlers(
                     )
 
                     // Desconto do Anão é consumido na ação atual
+                    if (ajusteHeroi !== 0) {
+                        session.habilidadesUsadasPorJogador[jogadorId] = true
+                    }
                     session.descontoEnigmaHeroiPorJogador[jogadorId] = 0
 
                     // Notificar todos (incluindo Mestre) sobre a submissão do enigma
@@ -1544,6 +1643,12 @@ export function registerSocketHandlers(
                     const desafioPublic = toPublicHouseChallenge(desafio)
                     const textoDesafio =
                         textoNormalizado || buildTextoDesafio(desafioPublic)
+
+                    // Salvar texto no riddlePendente para restauração após refresh
+                    if (session.riddlePendente) {
+                        session.riddlePendente.texto = textoDesafio
+                    }
+
                     io.to(session.id).emit('charada_iniciada', {
                         casaId,
                         texto: textoDesafio,
@@ -1560,6 +1665,20 @@ export function registerSocketHandlers(
                         texto: textoDesafio,
                         casaId
                     })
+
+                    // Auto-exibir o desafio para todos (sem precisar o mestre clicar)
+                    if (!session.enigmasExibidos) {
+                        session.enigmasExibidos = {}
+                    }
+                    session.enigmasExibidos[casaId] = true
+
+                    io.to(session.id).emit('enigma_exibido', {
+                        casaId,
+                        texto: textoDesafio,
+                        desafio: desafioPublic,
+                        autoExibido: true
+                    })
+
                     emitEstado(io, session)
                 } catch (error) {
                     socket.emit('acao_negada', {
@@ -1571,7 +1690,7 @@ export function registerSocketHandlers(
 
         socket.on(
             'confirm_answer',
-            ({
+            async ({
                 sessionId,
                 mestreId,
                 jogadorId,
@@ -1634,12 +1753,14 @@ export function registerSocketHandlers(
                         )
 
                         if (existente) {
+                            registerHintVariant(session, existente)
                             existente.tipo = tipoPista
                             existente.texto = tip.text
                             existente.source = tip.source
                             existente.frontSource = frontSource
                             existente.fragmentIndex = fragmentIndex
                             existente.ordem = ordem
+                            registerHintVariant(session, existente)
 
                             io.to(session.id).emit('carta_pista_atualizada', {
                                 carta: existente
@@ -1656,6 +1777,41 @@ export function registerSocketHandlers(
                                 ordem
                             }
                             session.deckPistas.push(novaCartaPista)
+                            registerHintVariant(session, novaCartaPista)
+
+                            // Auto-posicionar no próximo slot vazio
+                            const emptySlot = session.slotsEnigmaFinal.find(
+                                s => s.cardId === null
+                            )
+                            if (emptySlot) {
+                                emptySlot.cardId = novaCartaPista.id
+                                ensureHintState(session)
+                                session.activeHintVariantBySlot[
+                                    String(emptySlot.slotIndex)
+                                ] = getHintVariantId(novaCartaPista)
+
+                                // Recalcular texto montado
+                                session.textoEnigmaFinalMontado =
+                                    session.slotsEnigmaFinal
+                                        .filter(slot => slot.cardId !== null)
+                                        .map(slot => {
+                                            const c = session.deckPistas.find(
+                                                p => p.id === slot.cardId
+                                            )
+                                            return c?.texto || ''
+                                        })
+                                        .join(' ')
+
+                                io.to(session.id).emit('slot_atualizado', {
+                                    slotsEnigmaFinal: session.slotsEnigmaFinal,
+                                    textoEnigmaFinalMontado:
+                                        session.textoEnigmaFinalMontado,
+                                    todosSlotsPreenchiods:
+                                        session.slotsEnigmaFinal.every(
+                                            s => s.cardId !== null
+                                        )
+                                })
+                            }
 
                             io.to(session.id).emit('carta_pista_adicionada', {
                                 carta: novaCartaPista,
@@ -1690,9 +1846,11 @@ export function registerSocketHandlers(
                     // Registrar que a casa já teve resposta (para permitir "responder novamente")
                     session.registrosEnigmas[casaId] =
                         quality === 'otima' ? 'SucessoOtimo' : 'Ruim'
+                    pruneActiveHintVariants(session)
 
                     iniciarProximoTurno(io, session)
                     emitEstado(io, session)
+                    await persistHintProgress(session.id)
                 } catch (error) {
                     socket.emit('acao_negada', {
                         motivo: (error as Error).message
@@ -1734,6 +1892,16 @@ export function registerSocketHandlers(
                     })
                     return
                 }
+                // Impedir reativação enquanto a habilidade já estiver ativa (desconto/grátis pendente)
+                const abilityAlreadyActive =
+                    (session.descontoEnigmaHeroiPorJogador[jogadorId] ?? 0) !== 0 ||
+                    !!session.movimentoGratisHeroiPorJogador[jogadorId]
+                if (abilityAlreadyActive) {
+                    socket.emit('acao_negada', {
+                        motivo: 'Habilidade já está ativa'
+                    })
+                    return
+                }
 
                 switch (player.hero.tipo) {
                     case 'Anao':
@@ -1750,7 +1918,6 @@ export function registerSocketHandlers(
                             heroi: player.hero.tipo
                         })
                         session.descontoEnigmaHeroiPorJogador[jogadorId] = -1
-                        session.habilidadesUsadasPorJogador[jogadorId] = true
                         break
                     case 'Humano':
                         {
@@ -1772,7 +1939,6 @@ export function registerSocketHandlers(
                             heroi: player.hero.tipo
                         })
                         session.movimentoGratisHeroiPorJogador[jogadorId] = true
-                        session.habilidadesUsadasPorJogador[jogadorId] = true
                         break
                     case 'Sereia': {
                         if (!casaId) {
@@ -2126,19 +2292,21 @@ export function registerSocketHandlers(
             emitEstado(io, session)
         })
 
-        // Posicionar carta de pista em slot do enigma final
+        // Posicionar carta de pista em slot do enigma final (com suporte a swap)
         socket.on(
             'posicionar_pista_slot',
-            ({
+            async ({
                 sessionId,
                 jogadorId,
                 cardId,
-                slotIndex
+                slotIndex,
+                fromSlotIndex
             }: {
                 sessionId: string
                 jogadorId: string
                 cardId: string
                 slotIndex: number
+                fromSlotIndex?: number | null
             }) => {
                 const session = getSession(sessionId)
                 if (!session) return
@@ -2174,15 +2342,71 @@ export function registerSocketHandlers(
                     return
                 }
 
-                // Remover carta de qualquer slot anterior
-                session.slotsEnigmaFinal.forEach(slot => {
-                    if (slot.cardId === cardId) {
-                        slot.cardId = null
-                    }
-                })
+                // Swap logic: se dragged de um slot e o destino já tem carta, trocar
+                ensureHintState(session)
+                const targetSlot = session.slotsEnigmaFinal[slotIndex]
+                const targetCardId = targetSlot.cardId
+                const hasValidSourceSlot =
+                    fromSlotIndex !== null &&
+                    fromSlotIndex !== undefined &&
+                    Number.isInteger(fromSlotIndex) &&
+                    fromSlotIndex >= 0 &&
+                    fromSlotIndex < session.slotsEnigmaFinal.length
+                const sourceSlotHasDraggedCard =
+                    hasValidSourceSlot &&
+                    session.slotsEnigmaFinal[fromSlotIndex].cardId === cardId
+                const sourceSlotKey = hasValidSourceSlot
+                    ? String(fromSlotIndex)
+                    : null
+                const targetSlotKey = String(slotIndex)
+                const draggedVariantId =
+                    sourceSlotKey !== null
+                        ? session.activeHintVariantBySlot[sourceSlotKey]
+                        : null
+                const targetVariantId =
+                    session.activeHintVariantBySlot[targetSlotKey] || null
 
-                // Posicionar carta no slot
+                if (
+                    sourceSlotHasDraggedCard &&
+                    targetCardId !== null
+                ) {
+                    // Swap: colocar a carta do destino no slot de origem
+                    session.slotsEnigmaFinal[fromSlotIndex].cardId =
+                        targetCardId
+                    if (
+                        sourceSlotKey !== null &&
+                        isVariantValidForSlotCard(
+                            session,
+                            fromSlotIndex,
+                            targetVariantId
+                        )
+                    ) {
+                        session.activeHintVariantBySlot[sourceSlotKey] =
+                            targetVariantId as string
+                    } else if (sourceSlotKey !== null) {
+                        delete session.activeHintVariantBySlot[sourceSlotKey]
+                    }
+                } else {
+                    // Remover carta de qualquer slot anterior (não-swap)
+                    session.slotsEnigmaFinal.forEach(slot => {
+                        if (slot.cardId === cardId) {
+                            slot.cardId = null
+                        }
+                    })
+                    if (sourceSlotKey !== null) {
+                        delete session.activeHintVariantBySlot[sourceSlotKey]
+                    }
+                }
+
+                // Posicionar carta no slot destino
                 session.slotsEnigmaFinal[slotIndex].cardId = cardId
+                if (isVariantValidForSlotCard(session, slotIndex, draggedVariantId)) {
+                    session.activeHintVariantBySlot[targetSlotKey] =
+                        draggedVariantId as string
+                } else {
+                    delete session.activeHintVariantBySlot[targetSlotKey]
+                }
+                pruneActiveHintVariants(session)
 
                 // Recalcular texto montado
                 session.textoEnigmaFinalMontado = session.slotsEnigmaFinal
@@ -2203,13 +2427,14 @@ export function registerSocketHandlers(
                     )
                 })
                 emitEstado(io, session)
+                await persistHintProgress(session.id)
             }
         )
 
         // Remover carta de um slot
         socket.on(
             'remover_pista_slot',
-            ({
+            async ({
                 sessionId,
                 jogadorId,
                 slotIndex
@@ -2240,7 +2465,10 @@ export function registerSocketHandlers(
                     slotIndex >= 0 &&
                     slotIndex < session.slotsEnigmaFinal.length
                 ) {
+                    ensureHintState(session)
                     session.slotsEnigmaFinal[slotIndex].cardId = null
+                    delete session.activeHintVariantBySlot[String(slotIndex)]
+                    pruneActiveHintVariants(session)
 
                     // Recalcular texto montado
                     session.textoEnigmaFinalMontado = session.slotsEnigmaFinal
@@ -2262,7 +2490,141 @@ export function registerSocketHandlers(
                         )
                     })
                     emitEstado(io, session)
+                    await persistHintProgress(session.id)
                 }
+            }
+        )
+
+        socket.on(
+            'equipar_pista_ativa_slot',
+            async ({
+                sessionId,
+                jogadorId,
+                slotIndex,
+                variantId
+            }: {
+                sessionId: string
+                jogadorId: string
+                slotIndex: number
+                variantId: string
+            }) => {
+                const session = getSession(sessionId)
+                if (!session) return
+                if (session.jogoFinalizado) {
+                    socket.emit('acao_negada', { motivo: 'Jogo já finalizado' })
+                    return
+                }
+
+                const jogadorExiste = session.listaJogadores.some(
+                    player => player.id === jogadorId
+                )
+                if (!jogadorExiste) {
+                    socket.emit('acao_negada', {
+                        motivo: 'Jogador não pertence a esta sessão'
+                    })
+                    return
+                }
+
+                if (
+                    !Number.isInteger(slotIndex) ||
+                    slotIndex < 0 ||
+                    slotIndex >= session.slotsEnigmaFinal.length
+                ) {
+                    socket.emit('acao_negada', { motivo: 'Slot inválido' })
+                    return
+                }
+
+                ensureHintState(session)
+                pruneActiveHintVariants(session)
+
+                if (!isVariantValidForSlotCard(session, slotIndex, variantId)) {
+                    socket.emit('acao_negada', {
+                        motivo: 'Variante de pista inválida para este slot'
+                    })
+                    return
+                }
+
+                session.activeHintVariantBySlot[String(slotIndex)] = variantId
+
+                emitEstado(io, session)
+                await persistHintProgress(session.id)
+            }
+        )
+
+        // Jogador pede dica do enigma final (uma vez por partida)
+        socket.on(
+            'pedir_dica_enigma_final',
+            async ({
+                sessionId,
+                jogadorId
+            }: {
+                sessionId: string
+                jogadorId: string
+            }) => {
+                const session = getSession(sessionId)
+                if (!session) return
+
+                if (session.jogoFinalizado) {
+                    socket.emit('acao_negada', { motivo: 'Jogo já finalizado' })
+                    return
+                }
+
+                try {
+                    assertJogadorDaVez(session, jogadorId)
+                    assertSemRespostaPendente(session, jogadorId)
+                } catch (error) {
+                    socket.emit('acao_negada', {
+                        motivo: (error as Error).message
+                    })
+                    return
+                }
+
+                const slotsOk = todosSlotsEnigmaFinalPreenchidos(session)
+                if (!slotsOk && session.ph > 0) {
+                    socket.emit('acao_negada', {
+                        motivo: 'Você só pode pedir dica quando o enigma final estiver liberado.'
+                    })
+                    return
+                }
+
+                const pendente = desafioFinalPendentePorSessao.get(session.id)
+                if (pendente) {
+                    socket.emit('acao_negada', {
+                        motivo: 'Desafio final já está pendente para validação do Mestre.'
+                    })
+                    return
+                }
+
+                if (!session.pedidosDicaEnigmaFinalPorJogador) {
+                    session.pedidosDicaEnigmaFinalPorJogador = {}
+                }
+                if (session.pedidosDicaEnigmaFinalPorJogador[jogadorId]) {
+                    socket.emit('acao_negada', {
+                        motivo: 'Você já pediu uma dica do enigma final nesta partida.'
+                    })
+                    return
+                }
+
+                session.pedidosDicaEnigmaFinalPorJogador[jogadorId] = true
+
+                const player = session.listaJogadores.find(
+                    p => p.id === jogadorId
+                )
+
+                io.to(session.id).emit('pedido_dica_enigma_final', {
+                    jogador: player
+                        ? { id: player.id, nome: player.nome }
+                        : { id: jogadorId, nome: '' },
+                    ph: session.ph,
+                    textoEnigmaFinalMontado: session.textoEnigmaFinalMontado,
+                    slotsPreenchidos: slotsOk
+                })
+                socket.emit('pedido_dica_enigma_final_confirmado', {
+                    jogadorId
+                })
+
+                emitEstado(io, session)
+                await persistHintProgress(session.id)
             }
         )
 
