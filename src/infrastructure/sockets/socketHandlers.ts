@@ -1977,6 +1977,7 @@ export function registerSocketHandlers(
                         })
                         io.to(session.id).emit('sinal_dica_sutil', {
                             jogadorId,
+                            jogadorNome: player.nome,
                             heroi: 'Sereia',
                             casaId
                         })
@@ -2043,6 +2044,7 @@ export function registerSocketHandlers(
 
                 io.to(session.id).emit('sinal_dica_sutil', {
                     jogadorId: sereiaJogadorId,
+                    jogadorNome: sereiaPlayer.nome,
                     heroi: 'Sereia',
                     casaId
                 })
