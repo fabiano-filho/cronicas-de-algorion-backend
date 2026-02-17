@@ -116,6 +116,8 @@ export class GameSession {
     public descontoEnigmaHeroiPorJogador: Record<string, number> = {}
     public habilidadesUsadasPorJogador: Record<string, boolean> = {}
     public sereiaAbilityActive: string | null = null // jogadorId da Sereia quando ativa
+    public bruxaAbilityActive: string | null = null // jogadorId da Bruxa quando ativa
+    public bruxaUsosRestantes: number = 0 // quantas casas a Bruxa ainda pode revelar (max 2)
 
     // Deck de cartas de pista coletadas (para arrastar no frontend)
     public deckPistas: HintCard[] = []

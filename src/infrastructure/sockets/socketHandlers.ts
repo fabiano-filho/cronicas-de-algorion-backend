@@ -1896,7 +1896,8 @@ export function registerSocketHandlers(
                 const abilityAlreadyActive =
                     (session.descontoEnigmaHeroiPorJogador[jogadorId] ?? 0) !== 0 ||
                     !!session.movimentoGratisHeroiPorJogador[jogadorId] ||
-                    session.sereiaAbilityActive === jogadorId
+                    session.sereiaAbilityActive === jogadorId ||
+                    session.bruxaAbilityActive === jogadorId
                 if (abilityAlreadyActive) {
                     socket.emit('acao_negada', {
                         motivo: 'Habilidade já está ativa'
@@ -1984,35 +1985,12 @@ export function registerSocketHandlers(
                         break
                     }
                     case 'Bruxa': {
-                        const key = bruxaKey(sessionId, jogadorId)
-                        if (bruxaEscolhaPendente.has(key)) {
-                            socket.emit('acao_negada', {
-                                motivo: 'Habilidade da Bruxa já está em seleção. Escolha as cartas antes de tentar novamente.'
-                            })
-                            return
-                        }
-
-                        const ocultas = session.estadoTabuleiro
-                            .flat()
-                            .filter(
-                                card =>
-                                    card && !card.revelada && card.id !== 'C5'
-                            ) as Card[]
-
-                        if (ocultas.length === 0) {
-                            socket.emit('acao_negada', {
-                                motivo: 'Nenhuma carta oculta disponível para a Bruxa revelar (C5 não é permitido).'
-                            })
-                            return
-                        }
-
-                        bruxaEscolhaPendente.set(key, true)
-
-                        // Enviar opções para o próprio jogador escolher (sem revelar custos ainda)
-                        socket.emit('bruxa_escolher_cartas', {
-                            opcoes: ocultas.map(card => ({ id: card.id }))
+                        session.bruxaAbilityActive = jogadorId
+                        session.bruxaUsosRestantes = 2
+                        io.to(session.id).emit('habilidade_usada', {
+                            jogador: { id: player.id, nome: player.nome },
+                            heroi: 'Bruxa'
                         })
-                        // Não marca como usada aqui; só quando o jogador confirmar a seleção.
                         emitEstado(io, session)
                         return
                     }
@@ -2074,7 +2052,89 @@ export function registerSocketHandlers(
             }
         )
 
-        // Bruxa: jogador escolhe 1-2 cartas ocultas para ver o custo
+        // Bruxa: jogador revela custo de uma casa oculta (1 casa por vez, até 2)
+        socket.on(
+            'bruxa_revelar_custo_casa',
+            ({
+                sessionId,
+                jogadorId,
+                casaId
+            }: {
+                sessionId: string
+                jogadorId: string
+                casaId: string
+            }) => {
+                const session = getSession(sessionId)
+                if (!session) return
+                if (session.jogoFinalizado) {
+                    socket.emit('acao_negada', { motivo: 'Jogo já finalizado' })
+                    return
+                }
+                if (session.bruxaAbilityActive !== jogadorId) {
+                    socket.emit('acao_negada', {
+                        motivo: 'A habilidade da Bruxa não está ativa para você.'
+                    })
+                    return
+                }
+                if (session.bruxaUsosRestantes <= 0) {
+                    socket.emit('acao_negada', {
+                        motivo: 'Todos os usos da Bruxa já foram consumidos.'
+                    })
+                    return
+                }
+                if (casaId === 'C5') {
+                    socket.emit('acao_negada', {
+                        motivo: 'A Bruxa não pode usar a habilidade na casa C5.'
+                    })
+                    return
+                }
+
+                let card = null
+                try {
+                    const { row, col } = getBoardCoordsFromCasaId(casaId)
+                    card = session.estadoTabuleiro?.[row]?.[col] ?? null
+                } catch (error) {
+                    socket.emit('acao_negada', {
+                        motivo: `Casa inválida: ${casaId}`
+                    })
+                    return
+                }
+                if (!card) {
+                    socket.emit('acao_negada', {
+                        motivo: `Casa inválida: ${casaId}`
+                    })
+                    return
+                }
+                if (card.revelada) {
+                    socket.emit('acao_negada', {
+                        motivo: `A casa ${casaId} já está revelada.`
+                    })
+                    return
+                }
+
+                const player = session.listaJogadores.find(
+                    p => p.id === jogadorId
+                )
+
+                // Enviar custo revelado para TODOS os jogadores
+                io.to(session.id).emit('custo_casa_revelado', {
+                    casaId,
+                    custoExploracao: card.custoExploracao,
+                    jogadorNome: player?.nome || 'Bruxa'
+                })
+
+                session.bruxaUsosRestantes -= 1
+
+                if (session.bruxaUsosRestantes <= 0) {
+                    session.bruxaAbilityActive = null
+                    session.habilidadesUsadasPorJogador[jogadorId] = true
+                }
+
+                emitEstado(io, session)
+            }
+        )
+
+        // Bruxa: jogador escolhe 1-2 cartas ocultas para ver o custo (legado)
         socket.on(
             'bruxa_revelar_custos',
             ({
